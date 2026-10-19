@@ -2,6 +2,7 @@
 //   /api/feedback … 開発者への意見（送るのは誰でも、読むのは開発者の鍵が必要）
 //   /api/rules    … 遊んでいる人が作ったルール（開発者がCPUを学習させるため。中身は公開）
 //   /api/week     … 友人戦の週間ポイント（フレンドの週間1位ボーナス用）
+//   /api/fr       … フレンド申請の受け箱（申請・承認・拒否。相手がアプリを閉じていても届く）
 import { getStore } from '@netlify/blobs';
 
 // 開発者の鍵（そのものではなく SHA-256。鍵は開発者だけが持つ）
@@ -26,6 +27,15 @@ async function body(req, max = 8000) {
   const t = await req.text();
   if (t.length > max) return null;
   try { return JSON.parse(t); } catch { return null; }
+}
+/** フレンドコードの持ち主か（最初に使った端末の合言葉だけ受け付ける） */
+async function owner(code, token) {
+  const owners = getStore('owners');
+  const th = await sha('owner:' + token);
+  const own = await owners.get(code);
+  if (own && own !== th) return false;
+  if (!own) await owners.set(code, th);
+  return true;
 }
 async function listAll(st) { return (await st.list()).blobs; }
 
@@ -82,11 +92,7 @@ export default async (req, context) => {
         if (!isFinite(p) || Math.abs(p) > 1e6 || !Number.isInteger(g) || g < 0 || g > 5000) return json({ error: 'bad' }, 400);
         if (await limited('wk', context.ip, 200)) return json({ error: 'limit' }, 429);
         // 最初に送ってきた端末の合言葉だけ受け付ける（他人のコードで書き換えられないように）
-        const owners = getStore('owners');
-        const th = await sha('owner:' + token);
-        const own = await owners.get(code);
-        if (own && own !== th) return json({ error: 'owner' }, 403);
-        if (!own) await owners.set(code, th);
+        if (!(await owner(code, token))) return json({ error: 'owner' }, 403);
         await st.setJSON(`${wk}/${code}`, { p: Math.round(p * 10) / 10, g, at: Date.now() });
         return json({ ok: true });
       }
@@ -97,6 +103,35 @@ export default async (req, context) => {
         const out = {};
         await Promise.all(codes.map(async c => { const v = await st.get(`${wk}/${c}`, { type: 'json' }); if (v) out[c] = { p: v.p, g: v.g }; }));
         return json({ wk, totals: out });
+      }
+    }
+    if (path === 'fr') {
+      // フレンド申請の受け箱：送り主→相手 の最新の1通だけを残す。読むと消える
+      const st = getStore('fr');
+      const code = req.method === 'GET' ? str(url.searchParams.get('code'), 8) : '';
+      if (req.method === 'POST') {
+        const b = await body(req, 3000);
+        const from = str(b?.from, 8), to = str(b?.to, 8), t = str(b?.t, 4), token = str(b?.token, 64);
+        if (!/^[A-HJ-NP-Z2-9]{8}$/.test(from) || !/^[A-HJ-NP-Z2-9]{8}$/.test(to) || from === to || !['req', 'acc', 'rej'].includes(t) || token.length < 16) return json({ error: 'bad' }, 400);
+        if (!(await owner(from, token))) return json({ error: 'owner' }, 403);
+        if (await limited('fr', context.ip, 100)) return json({ error: 'limit' }, 429);
+        const ps = b.p && typeof b.p === 'object' ? JSON.stringify(b.p) : '{}';
+        const p = ps.length <= 2000 ? JSON.parse(ps) : {};
+        await st.setJSON(`${to}/${from}`, { t, p, at: Date.now() });
+        return json({ ok: true });
+      }
+      if (req.method === 'GET') {
+        const token = str(req.headers.get('x-token'), 64);
+        if (!/^[A-HJ-NP-Z2-9]{8}$/.test(code) || token.length < 16) return json({ error: 'bad' }, 400);
+        if (!(await owner(code, token))) return json({ error: 'owner' }, 403);
+        const { blobs } = await st.list({ prefix: `${code}/` });
+        const items = [];
+        for (const b of blobs.slice(0, 50)) {
+          const v = await st.get(b.key, { type: 'json' });
+          if (v) items.push({ from: b.key.slice(code.length + 1), ...v });
+          await st.delete(b.key);
+        }
+        return json({ items });
       }
     }
     return json({ error: 'not found' }, 404);
