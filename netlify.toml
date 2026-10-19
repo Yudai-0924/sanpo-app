@@ -1,0 +1,8 @@
+# 三鳳：公開の設定（public がアプリ本体、netlify/functions が小さなサーバー）
+[build]
+  publish = "public"
+  command = "echo ok"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
