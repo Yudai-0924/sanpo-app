@@ -37,11 +37,22 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid rgba(194,164,1
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
   var fmt = function (t) { var d = new Date(t); return d.toLocaleString('ja-JP'); };
-  try { $('key').value = localStorage.getItem('sanpo.admin') || ''; } catch (e) {}
+  // 開発者用アプリ（アーティファクト版）から開いたとき：#k=鍵 で自動で読み込む（#raw なら中身をそのまま表示）
+  var hp = {}; (location.hash || '').replace(/^#/, '').split('&').forEach(function (kv) { var i = kv.indexOf('='); hp[i < 0 ? kv : kv.slice(0, i)] = i < 0 ? '1' : decodeURIComponent(kv.slice(i + 1)); });
+  var RAW = !!hp.raw;
+  try { $('key').value = hp.k || localStorage.getItem('sanpo.admin') || ''; } catch (e) { $('key').value = hp.k || ''; }
+  if (hp.k && !RAW) { try { history.replaceState(null, '', location.pathname); } catch (e) {} }
   function load() {
     var key = $('key').value.trim();
     try { localStorage.setItem('sanpo.admin', key); } catch (e) {}
     $('msg').textContent = '読み込み中…';
+    if (RAW) {
+      Promise.all([fetch('/api/feedback', { headers: { 'x-admin-key': key }, cache: 'no-store' }).then(function (r) { return r.json(); }), fetch('/api/rules', { cache: 'no-store' }).then(function (r) { return r.json(); })]).then(function (a) {
+        document.body.innerHTML = '<pre id="raw"></pre>';
+        document.getElementById('raw').textContent = JSON.stringify({ feedback: a[0].items || null, count: a[0].count, rules: a[1].items || [] });
+      });
+      return;
+    }
     fetch('/api/feedback', { headers: { 'x-admin-key': key }, cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
       if (!d.items) { $('msg').textContent = '鍵が違います（件数だけ：' + (d.count || 0) + '件）'; $('fb').innerHTML = ''; return; }
       $('msg').textContent = '読み込みました';
