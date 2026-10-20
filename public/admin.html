@@ -22,11 +22,16 @@ button.gold { background: linear-gradient(180deg, #f0d48e, #c49a4c); color: #1d1
 table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 th, td { text-align: left; padding: 6px; border-bottom: 1px solid rgba(194,164,106,.18); }
 .wrap { overflow-x: auto; }
+.card.new { border-color: #8fe0b0; box-shadow: 0 0 0 2px rgba(143,224,176,.35); }
+.card .newtag { color: #0e1514; background: #8fe0b0; border-radius: 999px; padding: 0 8px; font-weight: 700; }
+.live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.live i { width: 8px; height: 8px; border-radius: 50%; background: #8fe0b0; box-shadow: 0 0 6px #8fe0b0; }
 </style></head>
 <body>
 <h1>三鳳 開発者ページ</h1>
 <div class="row"><input id="key" type="password" placeholder="開発者の鍵" autocomplete="off"><button class="gold" id="load">読み込む</button></div>
 <p class="msg" id="msg">鍵を入れて「読み込む」を押してください（この端末に覚えます）。</p>
+<div class="row"><span class="live" id="live" hidden><i></i>自動で更新中（10秒ごと）</span><button id="notif" hidden>新しい意見を通知する</button></div>
 <h2>意見・不具合の報告 <span id="fbn"></span></h2>
 <div id="fb"></div>
 <h2>遊んでいる人が作ったルール <span id="rln"></span></h2>
@@ -42,10 +47,11 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid rgba(194,164,1
   var RAW = !!hp.raw;
   try { $('key').value = hp.k || localStorage.getItem('sanpo.admin') || ''; } catch (e) { $('key').value = hp.k || ''; }
   if (hp.k && !RAW) { try { history.replaceState(null, '', location.pathname); } catch (e) {} }
-  function load() {
+  var known = null, timer = 0, base = document.title;
+  function load(quiet) {
     var key = $('key').value.trim();
     try { localStorage.setItem('sanpo.admin', key); } catch (e) {}
-    $('msg').textContent = '読み込み中…';
+    if (!quiet) $('msg').textContent = '読み込み中…';
     if (RAW) {
       Promise.all([fetch('/api/feedback', { headers: { 'x-admin-key': key }, cache: 'no-store' }).then(function (r) { return r.json(); }), fetch('/api/rules', { cache: 'no-store' }).then(function (r) { return r.json(); })]).then(function (a) {
         document.body.innerHTML = '<pre id="raw"></pre>';
@@ -55,10 +61,21 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid rgba(194,164,1
     }
     fetch('/api/feedback', { headers: { 'x-admin-key': key }, cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
       if (!d.items) { $('msg').textContent = '鍵が違います（件数だけ：' + (d.count || 0) + '件）'; $('fb').innerHTML = ''; return; }
-      $('msg').textContent = '読み込みました';
+      // 前に読んだときより新しい意見に印を付け、通知する
+      var fresh = known ? d.items.filter(function (x) { return known.indexOf(x.key) < 0; }) : [];
+      known = d.items.map(function (x) { return x.key; });
+      if (fresh.length) {
+        document.title = '(' + fresh.length + ') ' + base;
+        try { if (window.Notification && Notification.permission === 'granted') new Notification('三鳳：新しい意見 ' + fresh.length + '件', { body: String(fresh[0].text || '').slice(0, 80) }); } catch (e) {}
+      }
+      $('msg').textContent = '最終更新 ' + new Date().toLocaleTimeString('ja-JP');
+      $('live').hidden = false;
+      if (window.Notification && Notification.permission === 'default') $('notif').hidden = false;
+      if (!timer) timer = setInterval(function () { if (!document.hidden) load(true); }, 10000);
       $('fbn').textContent = '（' + d.items.length + '件）';
       $('fb').innerHTML = d.items.map(function (x) {
-        return '<div class="card"><div class="meta"><span class="cat">' + esc(CAT[x.cat] || x.cat) + '</span><span>' + esc(fmt(x.t)) + '</span><span>' + esc(x.name || '名前なし') + '</span>' + (x.contact ? '<span>連絡先：' + esc(x.contact) + '</span>' : '') + (x.friend ? '<span>フレンドコード：' + esc(x.friend) + '</span>' : '') + '</div>'
+        var isNew = fresh.some(function (y) { return y.key === x.key; });
+        return '<div class="card' + (isNew ? ' new' : '') + '"><div class="meta">' + (isNew ? '<span class="newtag">NEW</span>' : '') + '<span class="cat">' + esc(CAT[x.cat] || x.cat) + '</span><span>' + esc(fmt(x.t)) + '</span><span>' + esc(x.name || '名前なし') + '</span>' + (x.contact ? '<span>連絡先：' + esc(x.contact) + '</span>' : '') + (x.friend ? '<span>フレンドコード：' + esc(x.friend) + '</span>' : '') + '</div>'
           + '<div class="text">' + esc(x.text) + '</div><div class="dev">版 ' + esc(x.ver) + '　' + esc(x.dev) + '</div>'
           + '<div class="row" style="margin-top:6px"><button data-del="' + esc(x.key) + '">削除</button></div></div>';
       }).join('') || '<p class="msg">まだありません</p>';
@@ -71,13 +88,15 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid rgba(194,164,1
       }).join('') + '</table>' : '<p class="msg">まだありません</p>';
     });
   }
-  $('load').addEventListener('click', load);
+  $('load').addEventListener('click', function () { load(false); });
+  $('notif').addEventListener('click', function () { try { Notification.requestPermission().then(function () { $('notif').hidden = true; }); } catch (e) {} });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { document.title = base; if (known) load(true); } });
   $('fb').addEventListener('click', function (e) {
     var k = e.target && e.target.getAttribute && e.target.getAttribute('data-del');
     if (!k || !window.confirm('この報告を削除しますか？')) return;
-    fetch('/api/feedback?key=' + encodeURIComponent(k), { method: 'DELETE', headers: { 'x-admin-key': $('key').value.trim() } }).then(load);
+    fetch('/api/feedback?key=' + encodeURIComponent(k), { method: 'DELETE', headers: { 'x-admin-key': $('key').value.trim() } }).then(function () { load(true); });
   });
-  if ($('key').value) load();
+  if ($('key').value) load(false);
 })();
 </script>
 </body></html>

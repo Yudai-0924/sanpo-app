@@ -3,7 +3,9 @@
 //   /api/rules    … 遊んでいる人が作ったルール（開発者がCPUを学習させるため。中身は公開）
 //   /api/week     … 友人戦の週間ポイント（フレンドの週間1位ボーナス用）
 //   /api/fr       … フレンド申請の受け箱（申請・承認・拒否。相手がアプリを閉じていても届く）
-import { getStore } from '@netlify/blobs';
+import { getStore as gs } from '@netlify/blobs';
+// 書いたものがすぐ読めるように（既定は反映まで最大1分ほど遅れる）
+const getStore = name => gs({ name, consistency: 'strong' });
 
 // 開発者の鍵（そのものではなく SHA-256。鍵は開発者だけが持つ）
 const ADMIN = '3281af2469ee696e90b0f135bee186c5d8a0cfd8c288e9f526f473463d31dd60';
