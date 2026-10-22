@@ -3,6 +3,8 @@
 //   /api/rules    … 遊んでいる人が作ったルール（開発者がCPUを学習させるため。中身は公開）
 //   /api/week     … 友人戦の週間ポイント（フレンドの週間1位ボーナス用）
 //   /api/fr       … フレンド申請の受け箱（申請・承認・拒否。相手がアプリを閉じていても届く）
+//   /api/acct     … アカウント（ID＋パスワード）の登録・ログイン・ログアウト
+//   /api/sync     … アカウントのデータの同期（端末ごとの変更を、項目ごとの新しい方で合わせる）
 import { getStore as gs } from '@netlify/blobs';
 // 書いたものがすぐ読めるように（既定は反映まで最大1分ほど遅れる）
 const getStore = name => gs({ name, consistency: 'strong' });
@@ -40,6 +42,13 @@ async function owner(code, token) {
   return true;
 }
 async function listAll(st) { return (await st.list()).blobs; }
+const rnd = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('');
+/** パスワードはそのまま保存せず、塩を足して何度もハッシュした値だけを残す */
+async function pbkdf(pass, salt) {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: 100000, hash: 'SHA-256' }, k, 256);
+  return Array.from(new Uint8Array(bits), b => b.toString(16).padStart(2, '0')).join('');
+}
 
 export default async (req, context) => {
   const url = new URL(req.url);
@@ -134,6 +143,83 @@ export default async (req, context) => {
           await st.delete(b.key);
         }
         return json({ items });
+      }
+    }
+    if (path === 'acct') {
+      if (req.method !== 'POST') return json({ error: 'bad' }, 400);
+      const b = await body(req, 2000);
+      const op = str(b?.op, 10), id = str(b?.id, 20).toLowerCase();
+      if (!/^[a-z0-9_]{3,20}$/.test(id)) return json({ error: 'IDは半角の英小文字・数字・_ で3〜20文字です' }, 400);
+      const st = getStore('acct');
+      const key = `u/${id}`;
+      if (op === 'logout') {
+        const u = await st.get(key, { type: 'json' });
+        const th = await sha('tok:' + str(b?.token, 80));
+        if (u) { u.tokens = (u.tokens ?? []).filter(t => t.h !== th); await st.setJSON(key, u); }
+        return json({ ok: true });
+      }
+      const pass = typeof b?.pass === 'string' ? b.pass : '';
+      if (pass.length < 6 || pass.length > 64) return json({ error: 'パスワードは6〜64文字です' }, 400);
+      if (op === 'register') {
+        if (await limited('reg', context.ip, 10)) return json({ error: '今日はこれ以上登録できません' }, 429);
+        if (await st.get(key)) return json({ error: 'このIDはすでに使われています' }, 409);
+        const salt = rnd(16);
+        const u = { salt, hash: await pbkdf(pass, salt), tokens: [], created: Date.now() };
+        const tok = rnd(32);
+        u.tokens.push({ h: await sha('tok:' + tok), at: Date.now(), dev: str(b?.dev, 60) });
+        await st.setJSON(key, u);
+        return json({ ok: true, token: tok, id });
+      }
+      if (op === 'login') {
+        if (await limited('login', context.ip, 60) || await limited('login-' + id, 'id', 30)) return json({ error: 'ログインの試行が多すぎます。明日またお試しください' }, 429);
+        const u = await st.get(key, { type: 'json' });
+        if (!u || (await pbkdf(pass, u.salt)) !== u.hash) return json({ error: 'IDかパスワードが違います' }, 401);
+        const tok = rnd(32);
+        u.tokens = [...(u.tokens ?? []), { h: await sha('tok:' + tok), at: Date.now(), dev: str(b?.dev, 60) }].slice(-10);
+        await st.setJSON(key, u);
+        return json({ ok: true, token: tok, id });
+      }
+      return json({ error: 'bad' }, 400);
+    }
+    if (path === 'sync') {
+      const id = str(req.headers.get('x-acct-id'), 20).toLowerCase(), tok = str(req.headers.get('x-acct-token'), 80);
+      if (!/^[a-z0-9_]{3,20}$/.test(id) || tok.length < 20) return json({ error: 'auth' }, 401);
+      const u = await getStore('acct').get(`u/${id}`, { type: 'json' });
+      const th = await sha('tok:' + tok);
+      if (!u || !(u.tokens ?? []).some(t => t.h === th)) return json({ error: 'auth' }, 401);
+      if (await limited('sync', context.ip, 5000)) return json({ error: 'limit' }, 429);
+      const ds = getStore('acctdata');
+      const idxKey = `${id}/idx`;
+      const idx = (await ds.get(idxKey, { type: 'json' })) ?? { rev: 0, e: {} };
+      const okPath = p => typeof p === 'string' && /^(s\/sanma\.[a-z.]{2,30}|[rk]\/[A-Za-z0-9_\-.]{1,80})$/.test(p);
+      if (req.method === 'GET') {
+        // since より後に変わった項目を返す（多すぎるときは途中まで。more で続き）
+        const since = Math.max(0, Number(url.searchParams.get('since')) || 0);
+        const list = Object.entries(idx.e).filter(([, e]) => e.r > since).sort((a, b) => a[1].r - b[1].r);
+        const out = []; let size = 0, upto = since, more = false;
+        for (const [p, e] of list) {
+          if (size > 3_000_000 || out.length >= 400) { more = true; break; }
+          const v = e.d ? null : await ds.get(`${id}/d/${p}`, { type: 'json' });
+          out.push({ p, t: e.t, v: e.d ? null : (v === null || v === undefined ? null : v) });
+          size += v ? JSON.stringify(v).length : 10; upto = e.r;
+        }
+        return json({ rev: more ? upto : idx.rev, changes: out, more });
+      }
+      if (req.method === 'POST') {
+        const b = await body(req, 5_500_000);
+        if (!b || !Array.isArray(b.changes)) return json({ error: 'bad' }, 400);
+        let applied = 0;
+        const rev = idx.rev + 1;
+        for (const c of b.changes.slice(0, 500)) {
+          if (!okPath(c?.p) || typeof c.t !== 'number') continue;
+          const cur = idx.e[c.p];
+          if (cur && cur.t >= c.t) continue;
+          if (c.v === null || c.v === undefined) { await ds.delete(`${id}/d/${c.p}`); idx.e[c.p] = { t: c.t, r: rev, d: 1 }; }
+          else { if (JSON.stringify(c.v).length > 1_500_000) continue; await ds.setJSON(`${id}/d/${c.p}`, c.v); idx.e[c.p] = { t: c.t, r: rev }; }
+          applied++;
+        }
+        if (applied) { idx.rev = rev; await ds.setJSON(idxKey, idx); }
+        return json({ ok: true, rev: idx.rev, applied });
       }
     }
     return json({ error: 'not found' }, 404);
