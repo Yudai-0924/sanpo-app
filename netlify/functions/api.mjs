@@ -2,9 +2,13 @@
 //   /api/feedback … 開発者への意見（送るのは誰でも、読むのは開発者の鍵が必要）
 //   /api/rules    … 遊んでいる人が作ったルール（開発者がCPUを学習させるため。中身は公開）
 //   /api/week     … 友人戦の週間ポイント（フレンドの週間1位ボーナス用）
+//   /api/cup      … 週末大会（配牌固定戦）の成績（その週の最高）
 //   /api/fr       … フレンド申請の受け箱（申請・承認・拒否。相手がアプリを閉じていても届く）
 //   /api/acct     … アカウント（ID＋パスワード）の登録・ログイン・ログアウト
 //   /api/sync     … アカウントのデータの同期（端末ごとの変更を、項目ごとの新しい方で合わせる）
+//   /api/league   … リーグ（仲間うちの友人戦の通算順位表。参加コードを知っている人だけ）
+//   /api/err      … アプリの不具合の自動報告（同じ内容はまとめて数える。読むのは開発者だけ）
+//   /api/usage    … 利用状況（1日ごとの端末数と機能ごとの回数だけ。誰が使ったかは残さない）
 import { getStore as gs } from '@netlify/blobs';
 // 書いたものがすぐ読めるように（既定は反映まで最大1分ほど遅れる）
 const getStore = name => gs({ name, consistency: 'strong' });
@@ -116,6 +120,37 @@ export default async (req, context) => {
         return json({ wk, totals: out });
       }
     }
+    if (path === 'cup') {
+      // 週末大会（配牌固定戦）：その週の同じ配牌で打った成績の最高を残す
+      const st = getStore('cup');
+      if (req.method === 'POST') {
+        const b = await body(req, 2000);
+        const code = str(b?.code, 8), wk = str(b?.wk, 10), token = str(b?.token, 64);
+        if (!/^[A-HJ-NP-Z2-9]{8}$/.test(code) || !/^\d{4}-\d{2}-\d{2}$/.test(wk) || token.length < 16) return json({ error: 'bad' }, 400);
+        const sc = Number(b.score), pts = Number(b.points), rank = Number(b.rank);
+        if (!isFinite(sc) || Math.abs(sc) > 1000 || !isFinite(pts) || Math.abs(pts) > 500000 || ![1, 2, 3].includes(rank)) return json({ error: 'bad' }, 400);
+        if (await limited('cup', context.ip, 60)) return json({ error: 'limit' }, 429);
+        if (!(await owner(code, token))) return json({ error: 'owner' }, 403);
+        // 開催期間（金曜0時〜日曜24時・日本時間。終わりぎわに始めた対局のため6時間の猶予）の中だけ
+        const mon = Date.parse(wk + 'T00:00:00+09:00');
+        if (!isFinite(mon) || new Date(mon + 9 * 3600e3).getUTCDay() !== 1 || Date.now() < mon + 4 * 864e5 || Date.now() > mon + 7 * 864e5 + 6 * 3600e3) return json({ error: '大会の期間外です' }, 409);
+        const key = `${wk}/${code}`;
+        const cur = await st.get(key, { type: 'json' });
+        if ((cur?.tries ?? 0) >= 3) return json({ error: '挑戦は1人3回までです' }, 409);
+        const tries = (cur?.tries ?? 0) + 1;
+        const better = !cur || sc > cur.score;
+        await st.setJSON(key, { ...(better ? { score: Math.round(sc * 10) / 10, points: Math.round(pts), rank } : cur), tries, name: str(b?.name, 10) || cur?.name || '', at: Date.now() });
+        return json({ ok: true, best: better });
+      }
+      if (req.method === 'GET') {
+        const wk = str(url.searchParams.get('wk'), 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(wk)) return json({ error: 'bad' }, 400);
+        const blobs = (await st.list({ prefix: `${wk}/` })).blobs.slice(0, 500);
+        const all = (await Promise.all(blobs.map(async x => { const v = await st.get(x.key, { type: 'json' }); return v ? { code: x.key.slice(wk.length + 1), name: v.name, score: v.score, points: v.points, rank: v.rank, tries: v.tries } : null; }))).filter(Boolean);
+        all.sort((a, b) => b.score - a.score || b.points - a.points);
+        return json({ wk, count: all.length, list: all.slice(0, 50) });
+      }
+    }
     if (path === 'fr') {
       // フレンド申請の受け箱：送り主→相手 の最新の1通だけを残す。読むと消える
       const st = getStore('fr');
@@ -158,6 +193,18 @@ export default async (req, context) => {
         if (u) { u.tokens = (u.tokens ?? []).filter(t => t.h !== th); await st.setJSON(key, u); }
         return json({ ok: true });
       }
+      // ログイン中の端末の一覧（同期した時刻つき）と、ほかの端末のログアウト
+      if (op === 'devices' || op === 'revoke') {
+        const u = await st.get(key, { type: 'json' });
+        const th = await sha('tok:' + str(b?.token, 80));
+        if (!u || !(u.tokens ?? []).some(t => t.h === th)) return json({ error: 'もう一度ログインしてください' }, 401);
+        if (op === 'revoke') {
+          const at = Number(b?.at);
+          u.tokens = u.tokens.filter(t => t.h === th || (b?.all ? false : t.at !== at));
+          await st.setJSON(key, u);
+        }
+        return json({ ok: true, devices: u.tokens.map(t => ({ at: t.at, seen: t.seen ?? t.at, dev: t.dev ?? '', me: t.h === th })) });
+      }
       const pass = typeof b?.pass === 'string' ? b.pass : '';
       if (pass.length < 6 || pass.length > 64) return json({ error: 'パスワードは6〜64文字です' }, 400);
       if (op === 'register') {
@@ -167,6 +214,26 @@ export default async (req, context) => {
         const u = { salt, hash: await pbkdf(pass, salt), tokens: [], created: Date.now() };
         const tok = rnd(32);
         u.tokens.push({ h: await sha('tok:' + tok), at: Date.now(), dev: str(b?.dev, 60) });
+        await st.setJSON(key, u);
+        return json({ ok: true, token: tok, id });
+      }
+      // パスワードの変更（ほかの端末はログアウトになる）・アカウントの削除（データも消す）
+      if (op === 'passwd' || op === 'delete') {
+        if (await limited('login', context.ip, 60) || await limited('login-' + id, 'id', 30)) return json({ error: '試行が多すぎます。明日またお試しください' }, 429);
+        const u = await st.get(key, { type: 'json' });
+        if (!u || (await pbkdf(pass, u.salt)) !== u.hash) return json({ error: 'パスワードが違います' }, 401);
+        if (op === 'delete') {
+          const ds = getStore('acctdata');
+          const all = (await ds.list({ prefix: `${id}/` })).blobs;
+          for (const x of all) await ds.delete(x.key);
+          await st.delete(key);
+          return json({ ok: true });
+        }
+        const np = typeof b?.newPass === 'string' ? b.newPass : '';
+        if (np.length < 6 || np.length > 64) return json({ error: '新しいパスワードは6〜64文字です' }, 400);
+        u.salt = rnd(16); u.hash = await pbkdf(np, u.salt);
+        const tok = rnd(32);
+        u.tokens = [{ h: await sha('tok:' + tok), at: Date.now(), dev: str(b?.dev, 60) }];
         await st.setJSON(key, u);
         return json({ ok: true, token: tok, id });
       }
@@ -188,6 +255,9 @@ export default async (req, context) => {
       const th = await sha('tok:' + tok);
       if (!u || !(u.tokens ?? []).some(t => t.h === th)) return json({ error: 'auth' }, 401);
       if (await limited('sync', context.ip, 5000)) return json({ error: 'limit' }, 429);
+      // 端末ごとの最後に同期した時刻（書き込みを減らすため10分に1回だけ記録）
+      const tk = u.tokens.find(t => t.h === th);
+      if (tk && Date.now() - (tk.seen ?? 0) > 600000) { tk.seen = Date.now(); await getStore('acct').setJSON(`u/${id}`, u); }
       const ds = getStore('acctdata');
       const idxKey = `${id}/idx`;
       const idx = (await ds.get(idxKey, { type: 'json' })) ?? { rev: 0, e: {} };
@@ -220,6 +290,131 @@ export default async (req, context) => {
         }
         if (applied) { idx.rev = rev; await ds.setJSON(idxKey, idx); }
         return json({ ok: true, rev: idx.rev, applied });
+      }
+    }
+
+    if (path === 'league') {
+      // リーグ：meta（名前・作った人）・メンバーは1人1件（同時に入っても消えないように）・メンバーごとの結果（gid → [点, 着順, 時刻]）
+      const st = getStore('league');
+      const CODE = /^[A-HJ-NP-Z2-9]{8}$/, LID = /^[A-HJ-NP-Z2-9]{6}$/;
+      const membersOf = async id => {
+        const keys = (await st.list({ prefix: `${id}/mem/` })).blobs.map(x => x.key);
+        const ms = (await Promise.all(keys.map(k => st.get(k, { type: 'json' })))).filter(Boolean);
+        return ms.sort((a, b) => a.at - b.at);
+      };
+      const metaOut = async (id, meta) => ({ name: meta.name, owner: meta.owner, created: meta.created, members: (await membersOf(id)).map(m => ({ code: m.code, name: m.name })) });
+      if (req.method === 'POST') {
+        const b = await body(req, 20000);
+        const op = str(b?.op, 8), code = str(b?.code, 8), token = str(b?.token, 64);
+        if (!CODE.test(code) || token.length < 16) return json({ error: 'bad' }, 400);
+        if (await limited('lg', context.ip, 300)) return json({ error: 'limit' }, 429);
+        if (!(await owner(code, token))) return json({ error: 'owner' }, 403);
+        const me = str(b?.me, 10) || '名無し';
+        if (op === 'create') {
+          if (await limited('lgc', context.ip, 10)) return json({ error: '今日はこれ以上作れません' }, 429);
+          const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+          let id = '';
+          for (let i = 0; i < 5 && (!id || await st.get(`${id}/meta`)); i++) id = Array.from(crypto.getRandomValues(new Uint8Array(6)), x => A[x % A.length]).join('');
+          const meta = { name: str(b?.name, 20) || 'リーグ', owner: code, created: Date.now() };
+          await st.setJSON(`${id}/meta`, meta);
+          await st.setJSON(`${id}/mem/${code}`, { code, name: me, at: Date.now() });
+          return json({ ok: true, id, meta: await metaOut(id, meta) });
+        }
+        const id = str(b?.id, 6);
+        if (!LID.test(id)) return json({ error: 'リーグのコードが違います' }, 400);
+        const meta = await st.get(`${id}/meta`, { type: 'json' });
+        if (!meta) return json({ error: 'リーグが見つかりません' }, 404);
+        const mine = await st.get(`${id}/mem/${code}`, { type: 'json' });
+        if (op === 'join') {
+          if (!mine && (await st.list({ prefix: `${id}/mem/` })).blobs.length >= 30) return json({ error: 'このリーグは満員です（30人まで）' }, 409);
+          await st.setJSON(`${id}/mem/${code}`, { code, name: me, at: mine?.at ?? Date.now() });
+          return json({ ok: true, id, meta: await metaOut(id, meta) });
+        }
+        if (!mine) return json({ error: 'このリーグに入っていません' }, 403);
+        if (op === 'leave') {
+          await st.delete(`${id}/mem/${code}`);
+          await st.delete(`${id}/m/${code}`);
+          const rest = await membersOf(id);
+          if (!rest.length) await st.delete(`${id}/meta`);
+          else if (meta.owner === code) { meta.owner = rest[0].code; await st.setJSON(`${id}/meta`, meta); }
+          return json({ ok: true });
+        }
+        if (op === 'rename') {
+          if (meta.owner !== code) return json({ error: '名前を変えられるのは作った人だけです' }, 403);
+          meta.name = str(b?.name, 20) || meta.name;
+          await st.setJSON(`${id}/meta`, meta);
+          return json({ ok: true, meta: await metaOut(id, meta) });
+        }
+        if (op === 'result') {
+          const items = Array.isArray(b?.items) ? b.items.slice(0, 100) : [];
+          const cur = (await st.get(`${id}/m/${code}`, { type: 'json' })) ?? { g: {} };
+          let n = 0;
+          for (const x of items) {
+            const gid = str(x?.gid, 24), sc = Number(x?.score), rk = Number(x?.rank), at = Number(x?.at);
+            if (!/^[A-Za-z0-9-]{4,24}$/.test(gid) || !isFinite(sc) || Math.abs(sc) > 1000 || ![1, 2, 3].includes(rk) || !isFinite(at)) continue;
+            if (cur.g[gid]) continue;
+            cur.g[gid] = [Math.round(sc * 10) / 10, rk, Math.round(at)]; n++;
+          }
+          const keys = Object.keys(cur.g);
+          if (keys.length > 3000) for (const k of keys.sort((a, b) => cur.g[a][2] - cur.g[b][2]).slice(0, keys.length - 3000)) delete cur.g[k];
+          if (n) await st.setJSON(`${id}/m/${code}`, cur);
+          return json({ ok: true, added: n });
+        }
+        return json({ error: 'bad' }, 400);
+      }
+      if (req.method === 'GET') {
+        const id = str(url.searchParams.get('id'), 6);
+        if (!LID.test(id)) return json({ error: 'bad' }, 400);
+        const meta = await st.get(`${id}/meta`, { type: 'json' });
+        if (!meta) return json({ error: 'リーグが見つかりません' }, 404);
+        const m = await metaOut(id, meta);
+        const res = {};
+        await Promise.all(m.members.map(async x => { const v = await st.get(`${id}/m/${x.code}`, { type: 'json' }); res[x.code] = v?.g ?? {}; }));
+        return json({ id, meta: m, results: res });
+      }
+    }
+    if (path === 'err') {
+      // 不具合の自動報告：同じ内容（メッセージ＋場所）は1件にまとめ、回数と最後の時刻だけ増やす
+      const st = getStore('errs');
+      if (req.method === 'POST') {
+        const b = await body(req, 6000);
+        const msg = str(b?.msg, 300), stack = str(b?.stack, 1500), ver = str(b?.ver, 16), where = str(b?.where, 40), dev = str(b?.dev, 120);
+        if (!msg) return json({ error: 'bad' }, 400);
+        if (await limited('err', context.ip, 60)) return json({ ok: true, skipped: true });
+        const key = (await sha(`${msg}|${stack.split('\n').slice(0, 2).join('|')}|${ver}`)).slice(0, 24);
+        const cur = await st.get(key, { type: 'json' });
+        await st.setJSON(key, cur ? { ...cur, n: cur.n + 1, last: Date.now(), where: where || cur.where } : { msg, stack, ver, where, dev, n: 1, first: Date.now(), last: Date.now() });
+        return json({ ok: true });
+      }
+      if (!admin) return json({ error: 'admin' }, 403);
+      if (req.method === 'GET') {
+        const blobs = (await listAll(st)).slice(0, 300);
+        const items = (await Promise.all(blobs.map(async x => ({ key: x.key, ...(await st.get(x.key, { type: 'json' })) })))).filter(x => x.msg);
+        items.sort((a, b) => b.last - a.last);
+        return json({ items });
+      }
+      if (req.method === 'DELETE') { const k = str(url.searchParams.get('key'), 64); if (k === 'all') { for (const x of await listAll(st)) await st.delete(x.key); } else await st.delete(k); return json({ ok: true }); }
+    }
+    if (path === 'usage') {
+      // 利用状況：日ごとに「送ってきた端末の数」と「機能ごとの回数」の合計だけを残す
+      const st = getStore('usage');
+      const EV = ['open', 'cpu', 'friend', 'practice', 'review', 'stats', 'gacha', 'lesson', 'watch', 'cup', 'weekcup', 'league', 'whatif', 'manual', 'newdev', 'pwa', 'portrait'];
+      if (req.method === 'POST') {
+        const b = await body(req, 3000);
+        const d = str(b?.day, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || Math.abs(Date.parse(d) - Date.now()) > 40 * 864e5) return json({ error: 'bad' }, 400);
+        if (await limited('use', context.ip, 60)) return json({ ok: true, skipped: true });
+        const cur = (await st.get(d, { type: 'json' })) ?? { devs: 0, ev: {} };
+        cur.devs++;
+        for (const k of EV) { const v = Number(b?.ev?.[k]); if (Number.isInteger(v) && v > 0) cur.ev[k] = (cur.ev[k] ?? 0) + Math.min(v, 500); }
+        await st.setJSON(d, cur);
+        return json({ ok: true });
+      }
+      if (req.method === 'GET') {
+        if (!admin) return json({ error: 'admin' }, 403);
+        const blobs = (await listAll(st)).map(x => x.key).sort().slice(-90);
+        const days = await Promise.all(blobs.map(async k => ({ day: k, ...(await st.get(k, { type: 'json' })) })));
+        return json({ days });
       }
     }
     return json({ error: 'not found' }, 404);

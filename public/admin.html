@@ -34,6 +34,11 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid rgba(194,164,1
 <div class="row"><span class="live" id="live" hidden><i></i>自動で更新中（10秒ごと）</span><button id="notif" hidden>新しい意見を通知する</button></div>
 <h2>意見・不具合の報告 <span id="fbn"></span></h2>
 <div id="fb"></div>
+<h2>アプリの不具合（自動報告） <span id="ern"></span></h2>
+<div class="row"><button id="errclr" hidden>すべて消す</button></div>
+<div id="er"></div>
+<h2>利用状況（日ごと） <span id="usn"></span></h2>
+<div class="wrap" id="us"></div>
 <h2>遊んでいる人が作ったルール <span id="rln"></span></h2>
 <div class="wrap" id="rl"></div>
 <script>
@@ -80,6 +85,24 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid rgba(194,164,1
           + '<div class="row" style="margin-top:6px"><button data-del="' + esc(x.key) + '">削除</button></div></div>';
       }).join('') || '<p class="msg">まだありません</p>';
     }).catch(function () { $('msg').textContent = '読み込めませんでした'; });
+    if (!quiet) fetch('/api/err', { headers: { 'x-admin-key': key }, cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+      var it = d.items || [];
+      $('ern').textContent = d.items ? '（' + it.length + '種類）' : '';
+      $('errclr').hidden = !it.length;
+      $('er').innerHTML = it.length ? it.map(function (x) {
+        return '<div class="card"><div class="meta"><span class="cat">' + esc(x.n) + '回</span><span>最後 ' + esc(fmt(x.last)) + '</span><span>最初 ' + esc(fmt(x.first)) + '</span><span>' + esc(x.where) + '</span><span>版 ' + esc(x.ver) + '</span></div>'
+          + '<div class="text">' + esc(x.msg) + '</div><div class="dev">' + esc(String(x.stack || '').split('\n').slice(0, 5).join('\n')) + '</div><div class="dev">' + esc(x.dev) + '</div>'
+          + '<div class="row" style="margin-top:6px"><button data-edel="' + esc(x.key) + '">直したので消す</button></div></div>';
+      }).join('') : '<p class="msg">' + (d.items ? '届いていません' : '鍵が必要です') + '</p>';
+    }).catch(function () {});
+    if (!quiet) fetch('/api/usage', { headers: { 'x-admin-key': key }, cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+      var days = (d.days || []).slice().reverse();
+      var EV = [['open', '起動'], ['cpu', 'CPU戦'], ['friend', '友人戦'], ['practice', '練習'], ['lesson', '入門'], ['review', '牌譜'], ['whatif', 'もしも'], ['stats', '成績'], ['gacha', 'ガチャ'], ['watch', '観戦'], ['cup', '大会'], ['weekcup', '週末大会'], ['league', 'リーグ'], ['manual', '使い方'], ['newdev', '新しい端末'], ['pwa', 'ホーム画面'], ['portrait', '縦向き']];
+      $('usn').textContent = days.length ? '（直近' + days.length + '日）' : '';
+      $('us').innerHTML = days.length ? '<table><tr><th>日付</th><th>端末数</th>' + EV.map(function (e) { return '<th>' + e[1] + '</th>'; }).join('') + '</tr>' + days.map(function (x) {
+        return '<tr><td>' + esc(x.day) + '</td><td>' + esc(x.devs) + '</td>' + EV.map(function (e) { return '<td>' + esc((x.ev || {})[e[0]] || '') + '</td>'; }).join('') + '</tr>';
+      }).join('') + '</table><p class="msg">前の日の分を、次にアプリを開いたときにまとめて送ります（今日の分は明日以降に出ます）。誰が使ったかは記録していません。</p>' : '<p class="msg">' + (d.days ? 'まだありません' : '鍵が必要です') + '</p>';
+    }).catch(function () {});
     fetch('/api/rules', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
       var it = d.items || [];
       $('rln').textContent = '（' + it.length + '種類）';
@@ -95,6 +118,15 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid rgba(194,164,1
     var k = e.target && e.target.getAttribute && e.target.getAttribute('data-del');
     if (!k || !window.confirm('この報告を削除しますか？')) return;
     fetch('/api/feedback?key=' + encodeURIComponent(k), { method: 'DELETE', headers: { 'x-admin-key': $('key').value.trim() } }).then(function () { load(true); });
+  });
+  $('er').addEventListener('click', function (e) {
+    var k = e.target && e.target.getAttribute && e.target.getAttribute('data-edel');
+    if (!k) return;
+    fetch('/api/err?key=' + encodeURIComponent(k), { method: 'DELETE', headers: { 'x-admin-key': $('key').value.trim() } }).then(function () { load(false); });
+  });
+  $('errclr').addEventListener('click', function () {
+    if (!window.confirm('不具合の報告をすべて消しますか？')) return;
+    fetch('/api/err?key=all', { method: 'DELETE', headers: { 'x-admin-key': $('key').value.trim() } }).then(function () { load(false); });
   });
   if ($('key').value) load(false);
 })();

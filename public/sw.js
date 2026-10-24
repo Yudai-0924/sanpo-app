@@ -1,4 +1,4 @@
-const C = 'sanma-e1f294a8bfff';
+const C = 'sanma-476eacf9529c';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(C).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== C).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
