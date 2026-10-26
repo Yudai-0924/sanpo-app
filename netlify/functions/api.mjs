@@ -8,7 +8,7 @@
 //   /api/sync     … アカウントのデータの同期（端末ごとの変更を、項目ごとの新しい方で合わせる）
 //   /api/league   … リーグ（仲間うちの友人戦の通算順位表。参加コードを知っている人だけ）
 //   /api/err      … アプリの不具合の自動報告（同じ内容はまとめて数える。読むのは開発者だけ）
-//   /api/usage    … 利用状況（1日ごとの端末数と機能ごとの回数だけ。誰が使ったかは残さない）
+//   /api/usage    … 利用状況（1日ごとの端末数と機能ごとの回数・使っている人ごとの名前・フレンドコード・アカウントID・最後に開いた時刻と回数）
 import { getStore as gs } from '@netlify/blobs';
 // 書いたものがすぐ読めるように（既定は反映まで最大1分ほど遅れる）
 const getStore = name => gs({ name, consistency: 'strong' });
@@ -373,6 +373,30 @@ export default async (req, context) => {
         return json({ id, meta: m, results: res });
       }
     }
+    // 共有の窓口（src/net/shared.ts）：場所ごとに、各自が自分の分を1件だけ書き、全員の分を一覧で読む
+    if (path === 'shared') {
+      const st = getStore('shared');
+      if (req.method === 'POST') {
+        const b = await body(req, 2600);
+        const space = str(b?.space, 24), code = str(b?.code, 8), token = str(b?.token, 64);
+        if (!/^[a-z0-9-]{1,24}$/.test(space) || !/^[A-HJ-NP-Z2-9]{8}$/.test(code) || token.length < 16 || b?.data === undefined) return json({ error: 'bad' }, 400);
+        if (JSON.stringify(b.data).length > 2000) return json({ error: 'big' }, 413);
+        if (await limited('sh', context.ip, 300)) return json({ error: 'limit' }, 429);
+        // 最初に送ってきた端末の合言葉だけ受け付ける（他人の分を書き換えられないように）
+        if (!(await owner(code, token))) return json({ error: 'owner' }, 403);
+        await st.setJSON(`${space}/${code}`, { data: b.data, at: Date.now() });
+        return json({ ok: true });
+      }
+      if (req.method === 'GET') {
+        const space = str(url.searchParams.get('space'), 24);
+        if (!/^[a-z0-9-]{1,24}$/.test(space)) return json({ error: 'bad' }, 400);
+        if (await limited('shr', context.ip, 400)) return json({ error: 'limit' }, 429);
+        const { blobs } = await st.list({ prefix: `${space}/` });
+        const keys = blobs.map(x => x.key).slice(0, 300);
+        const list = (await Promise.all(keys.map(async k => { const v = await st.get(k, { type: 'json' }); return v ? { who: k.slice(space.length + 1), data: v.data, at: v.at } : null; }))).filter(Boolean);
+        return json({ space, list });
+      }
+    }
     if (path === 'err') {
       // 不具合の自動報告：同じ内容（メッセージ＋場所）は1件にまとめ、回数と最後の時刻だけ増やす
       const st = getStore('errs');
@@ -396,11 +420,30 @@ export default async (req, context) => {
       if (req.method === 'DELETE') { const k = str(url.searchParams.get('key'), 64); if (k === 'all') { for (const x of await listAll(st)) await st.delete(x.key); } else await st.delete(k); return json({ ok: true }); }
     }
     if (path === 'usage') {
-      // 利用状況：日ごとに「送ってきた端末の数」と「機能ごとの回数」の合計だけを残す
+      // 利用状況：日ごとの「送ってきた端末の数」と「機能ごとの回数」、使っている人ごとの記録（開発者だけが見る）
       const st = getStore('usage');
+      const us = getStore('users');
       const EV = ['open', 'cpu', 'friend', 'practice', 'review', 'stats', 'gacha', 'lesson', 'watch', 'cup', 'weekcup', 'league', 'whatif', 'manual', 'newdev', 'pwa', 'portrait'];
       if (req.method === 'POST') {
         const b = await body(req, 3000);
+        const w = b?.who && typeof b.who === 'object' ? b.who : null;
+        const code = str(w?.code, 16).replace(/[^A-Za-z0-9-]/g, ''), acct = str(w?.acct, 32).replace(/[^A-Za-z0-9_.-]/g, '');
+        const ukey = acct ? `a-${acct}` : code ? `c-${code}` : '';
+        /** 使っている人の記録を更新（開いた回数・最後に開いた時刻・機能ごとの回数） */
+        const touch = async (ev) => {
+          if (!ukey) return;
+          const u = (await us.get(ukey, { type: 'json' })) ?? { first: Date.now(), opens: 0, ev: {} };
+          u.code = code || u.code || ''; u.acct = acct || u.acct || ''; u.name = str(w?.name, 20) || u.name || '';
+          u.ver = str(w?.ver, 20); u.dev = str(w?.dev, 160); u.pwa = w?.pwa === true;
+          if (!ev) { u.opens = (u.opens ?? 0) + 1; u.last = Date.now(); }
+          else for (const k of EV) { const v = Number(ev[k]); if (Number.isInteger(v) && v > 0) u.ev[k] = (u.ev[k] ?? 0) + Math.min(v, 500); }
+          await us.setJSON(ukey, u);
+        };
+        if (b?.hello === true) {
+          if (await limited('hello', context.ip, 30)) return json({ ok: true, skipped: true });
+          await touch(null);
+          return json({ ok: true });
+        }
         const d = str(b?.day, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || Math.abs(Date.parse(d) - Date.now()) > 40 * 864e5) return json({ error: 'bad' }, 400);
         if (await limited('use', context.ip, 60)) return json({ ok: true, skipped: true });
@@ -408,13 +451,16 @@ export default async (req, context) => {
         cur.devs++;
         for (const k of EV) { const v = Number(b?.ev?.[k]); if (Number.isInteger(v) && v > 0) cur.ev[k] = (cur.ev[k] ?? 0) + Math.min(v, 500); }
         await st.setJSON(d, cur);
+        await touch(b?.ev && typeof b.ev === 'object' ? b.ev : {});
         return json({ ok: true });
       }
       if (req.method === 'GET') {
         if (!admin) return json({ error: 'admin' }, 403);
         const blobs = (await listAll(st)).map(x => x.key).sort().slice(-90);
         const days = await Promise.all(blobs.map(async k => ({ day: k, ...(await st.get(k, { type: 'json' })) })));
-        return json({ days });
+        const ukeys = (await listAll(us)).map(x => x.key).slice(0, 500);
+        const users = (await Promise.all(ukeys.map(async k => ({ key: k, ...(await us.get(k, { type: 'json' })) })))).sort((a, b) => (b.last ?? 0) - (a.last ?? 0));
+        return json({ days, users });
       }
     }
     return json({ error: 'not found' }, 404);

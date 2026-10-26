@@ -37,6 +37,8 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid rgba(194,164,1
 <h2>アプリの不具合（自動報告） <span id="ern"></span></h2>
 <div class="row"><button id="errclr" hidden>すべて消す</button></div>
 <div id="er"></div>
+<h2>使っている人</h2>
+<div class="wrap" id="usr"></div>
 <h2>利用状況（日ごと） <span id="usn"></span></h2>
 <div class="wrap" id="us"></div>
 <h2>遊んでいる人が作ったルール <span id="rln"></span></h2>
@@ -101,7 +103,12 @@ th, td { text-align: left; padding: 6px; border-bottom: 1px solid rgba(194,164,1
       $('usn').textContent = days.length ? '（直近' + days.length + '日）' : '';
       $('us').innerHTML = days.length ? '<table><tr><th>日付</th><th>端末数</th>' + EV.map(function (e) { return '<th>' + e[1] + '</th>'; }).join('') + '</tr>' + days.map(function (x) {
         return '<tr><td>' + esc(x.day) + '</td><td>' + esc(x.devs) + '</td>' + EV.map(function (e) { return '<td>' + esc((x.ev || {})[e[0]] || '') + '</td>'; }).join('') + '</tr>';
-      }).join('') + '</table><p class="msg">前の日の分を、次にアプリを開いたときにまとめて送ります（今日の分は明日以降に出ます）。誰が使ったかは記録していません。</p>' : '<p class="msg">' + (d.days ? 'まだありません' : '鍵が必要です') + '</p>';
+      }).join('') + '</table><p class="msg">前の日の分を、次にアプリを開いたときにまとめて送ります（今日の分は明日以降に出ます）。</p>' : '<p class="msg">' + (d.days ? 'まだありません' : '鍵が必要です') + '</p>';
+      var users = d.users || [];
+      var top = function (ev) { return EV.filter(function (e) { return ['open', 'newdev', 'pwa', 'portrait'].indexOf(e[0]) < 0 && (ev || {})[e[0]]; }).sort(function (a, b) { return ev[b[0]] - ev[a[0]]; }).slice(0, 4).map(function (e) { return e[1] + ' ' + ev[e[0]]; }).join('・'); };
+      $('usr').innerHTML = users.length ? '<p class="msg">' + users.length + '人（最後に開いた順）</p><table><tr><th>名前</th><th>ID</th><th>フレンドコード</th><th>最後に開いた</th><th>最初</th><th>開いた回数</th><th>よく使う機能</th><th>版・端末</th></tr>' + users.map(function (u) {
+        return '<tr><td>' + esc(u.name || '（名前なし）') + '</td><td>' + esc(u.acct || '—') + '</td><td>' + esc(u.code || '—') + '</td><td>' + esc(u.last ? fmt(u.last) : '—') + '</td><td>' + esc(u.first ? fmt(u.first) : '—') + '</td><td>' + esc(u.opens || 0) + '</td><td>' + esc(top(u.ev)) + '</td><td class="dev">' + esc((u.ver || '') + (u.pwa ? '・ホーム画面' : '') + ' ' + (u.dev || '')) + '</td></tr>';
+      }).join('') + '</table>' : '<p class="msg">' + (d.users ? 'まだありません' : '') + '</p>';
     }).catch(function () {});
     fetch('/api/rules', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
       var it = d.items || [];
