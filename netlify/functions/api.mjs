@@ -8,6 +8,7 @@
 //   /api/sync     … アカウントのデータの同期（端末ごとの変更を、項目ごとの新しい方で合わせる）
 //   /api/league   … リーグ（仲間うちの友人戦の通算順位表。参加コードを知っている人だけ）
 //   /api/err      … アプリの不具合の自動報告（同じ内容はまとめて数える。読むのは開発者だけ）
+//   /api/draw     … 全員共通の抽選（宝くじ・ナンバーズ）。回ごとの種を作って保存し、抽選の前は種のハッシュだけ、抽選のあとは種も返す
 //   /api/usage    … 利用状況（1日ごとの端末数と機能ごとの回数・使っている人ごとの名前・フレンドコード・アカウントID・最後に開いた時刻と回数）
 import { getStore as gs } from '@netlify/blobs';
 // 書いたものがすぐ読めるように（既定は反映まで最大1分ほど遅れる）
@@ -396,6 +397,26 @@ export default async (req, context) => {
         const list = (await Promise.all(keys.map(async k => { const v = await st.get(k, { type: 'json' }); return v ? { who: k.slice(space.length + 1), data: v.data, at: v.at } : null; }))).filter(Boolean);
         return json({ space, list });
       }
+    }
+    if (path === 'draw' && req.method === 'GET') {
+      // 回の名前：num-YYYYMMDD（毎日20時）か loto-YYYYMMDD（日曜20時）。日本時間
+      const id = str(url.searchParams.get('id'), 16);
+      const m = /^(num|loto)-(\d{4})(\d{2})(\d{2})$/.exec(id);
+      if (!m) return json({ error: 'bad' }, 400);
+      const at = Date.UTC(+m[2], +m[3] - 1, +m[4], 20) - 9 * 3600e3;
+      if (!isFinite(at) || (m[1] === 'loto' && new Date(at + 9 * 3600e3).getUTCDay() !== 0)) return json({ error: 'bad' }, 400);
+      if (at - Date.now() > 8 * 864e5 || Date.now() - at > 120 * 864e5) return json({ error: 'range' }, 400);
+      if (await limited('dr', context.ip, 300)) return json({ error: 'limit' }, 429);
+      const st = getStore('draws');
+      let v = await st.get(id, { type: 'json' });
+      if (!v?.seed) {
+        // 抽選の時刻を過ぎてから初めて作ることはしない（あとから都合のよい種を作れないように）
+        if (Date.now() >= at) return json({ error: 'none' }, 404);
+        const seed = rnd(32);
+        v = { seed, hash: await sha(seed), made: Date.now() };
+        await st.setJSON(id, v);
+      }
+      return json({ id, hash: v.hash, ...(Date.now() >= at ? { seed: v.seed } : {}) });
     }
     if (path === 'err') {
       // 不具合の自動報告：同じ内容（メッセージ＋場所）は1件にまとめ、回数と最後の時刻だけ増やす
