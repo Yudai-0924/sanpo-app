@@ -1,5 +1,4 @@
 // 三鳳の小さなサーバー（Netlify Functions + Netlify Blobs）
-//   /api/feedback … 開発者への意見（送るのは誰でも、読むのは開発者の鍵が必要）
 //   /api/rules    … 遊んでいる人が作ったルール（開発者がCPUを学習させるため。中身は公開）
 //   /api/week     … 友人戦の週間ポイント（フレンドの週間1位ボーナス用）
 //   /api/cup      … 週末大会（配牌固定戦）の成績（その週の最高）
@@ -9,14 +8,27 @@
 //   /api/league   … リーグ（仲間うちの友人戦の通算順位表。参加コードを知っている人だけ）
 //   /api/err      … アプリの不具合の自動報告（同じ内容はまとめて数える。読むのは開発者だけ）
 //   /api/draw     … 全員共通の抽選（宝くじ・ナンバーズ）。回ごとの種を作って保存し、抽選の前は種のハッシュだけ、抽選のあとは種も返す
+//   /api/race     … レース場の種（日ごと・6レースか12レース分）。発走までは種のハッシュだけ、発走のあとは種も返す
+//   /api/town     … 町の様子（フレンドが留守でも見られる最後の様子）と、訪ねてくれた数（段階7）
+//   /api/note     … フレンドへのお知らせの受け箱（騎乗の賞金・合同レースの結果など）
+//   /api/best     … 自己ベストと全員のランキング（ありえない記録ははじく）
+//   /api/bingo    … 定時ビンゴ（回ごとの種・参加・ビンゴした順番と配当）
+//   /api/fest     … 町の祭り（みんなの和了の合計と目標）
+//   /api/sched    … 運営の予約（季節イベント・ごほうび増量・期間限定ルール・お知らせ。読むのは誰でも、書くのは開発者の鍵が必要）
 //   /api/usage    … 利用状況（1日ごとの端末数と機能ごとの回数・使っている人ごとの名前・フレンドコード・アカウントID・最後に開いた時刻と回数）
 import { getStore as gs } from '@netlify/blobs';
 // 書いたものがすぐ読めるように（既定は反映まで最大1分ほど遅れる）
 const getStore = name => gs({ name, consistency: 'strong' });
 
+// 牌ビンゴの決まり（src/games/bingo/core.ts を build.mjs が下の行に埋め込む）
+var BingoCore=(()=>{var g=Object.defineProperty;var U=Object.getOwnPropertyDescriptor;var V=Object.getOwnPropertyNames;var P=Object.prototype.hasOwnProperty;var k=(t,n)=>{for(var e in n)g(t,e,{get:n[e],enumerable:!0})},z=(t,n,e,r)=>{if(n&&typeof n=="object"||typeof n=="function")for(let o of V(n))!P.call(t,o)&&o!==e&&g(t,o,{get:()=>n[o],enumerable:!(r=U(n,o))||r.enumerable});return t};var D=t=>z(g({},"__esModule",{value:!0}),t);var Q={};k(Q,{EVENT_CALLS:()=>R,EVENT_HOURS:()=>C,EVENT_PRICE:()=>N,EVENT_RETURN:()=>M,EVENT_SHARE:()=>v,EVENT_STEP:()=>y,FREE:()=>I,LINES:()=>S,N_BALLS:()=>B,SOLO_CALLS:()=>J,SOLO_PAY:()=>O,SOLO_PRICE:()=>Y,bingoAt:()=>A,callsOf:()=>w,doneLines:()=>j,eventResult:()=>K,eventStart:()=>$,isJunLine:()=>T,isRed:()=>E,kindOf:()=>L,makeCard:()=>_,nextEvent:()=>G,numOf:()=>b,seedRandom:()=>d,soloPay:()=>q,suitOf:()=>x});var B=37,I=-1;function d(t){let n=1779033703^t.length;for(let r=0;r<t.length;r++)n=Math.imul(n^t.charCodeAt(r),3432918353),n=n<<13|n>>>19;let e=n>>>0;return()=>{e=e+1831565813>>>0;let r=e;return r=Math.imul(r^r>>>15,r|1),r^=r+Math.imul(r^r>>>7,r|61),((r^r>>>14)>>>0)/4294967296}}var E=t=>t>=34,x=t=>t>=34?["m","p","s"][t-34]:t<9?"m":t<18?"p":t<27?"s":"z",b=t=>t>=34?5:t<27?t%9+1:t-26,L=t=>t>=34?(t-34)*9+4:t,i=(t,n)=>{for(let e=t.length-1;e>0;e--){let r=Math.floor(n()*(e+1));[t[e],t[r]]=[t[r],t[e]]}return t},h=t=>t.sort((n,e)=>b(n)-b(e)||(E(n)?1:0)-(E(e)?1:0)||n-e);function _(t){let n=d("bingo-card:"+t),e=(c,m)=>Array.from({length:m},(W,F)=>c+F),r=h(i([...e(0,9),34],n).slice(0,5)),o=h(i([...e(9,9),35],n).slice(0,5)),a=i(e(27,6),n).slice(0,4).sort((c,m)=>c-m),f=[a[0],a[1],-1,a[2],a[3]],l=h(i([...e(18,9),36],n).slice(0,5)),s=new Set([...r,...o,...l].map(L)),u=i(e(0,27).filter(c=>!s.has(c)),n).slice(0,5).sort((c,m)=>c-m),p=[r,o,f,l,u];return Array.from({length:25},(c,m)=>p[m%5][Math.floor(m/5)])}function w(t){return i(Array.from({length:37},(n,e)=>e),d("bingo-call:"+t))}var S=[...[0,1,2,3,4].map(t=>[0,1,2,3,4].map(n=>t*5+n)),...[0,1,2,3,4].map(t=>[0,1,2,3,4].map(n=>n*5+t)),[0,6,12,18,24],[4,8,12,16,20]];function T(t,n){let e=n.map(o=>t[o]).filter(o=>o!==-1);if(e.length<4||e.some(o=>x(o)==="z")||new Set(e.map(x)).size!==1)return!1;let r=e.map(b).sort((o,a)=>o-a);return r.every((o,a)=>a===0||o===r[a-1]+1)}var H=t=>t===-1?1:E(t)?2:1;function j(t,n,e){let r=new Set(n.slice(0,e));return S.map((o,a)=>({k:a,w:o.reduce((f,l)=>f+(t[l]===-1||r.has(t[l])?H(t[l]):0),0)})).filter(o=>o.w>=5).map(o=>o.k)}function A(t,n,e=37){for(let r=1;r<=Math.min(e,n.length);r++){let o=j(t,n,r);if(o.length)return{at:r,jun:o.some(a=>T(t,S[a])),lines:o}}return{at:0,jun:!1,lines:[]}}var Y=100,J=20,O=[{upto:6,mult:10},{upto:8,mult:5},{upto:10,mult:3},{upto:12,mult:2},{upto:14,mult:1.2},{upto:16,mult:.8},{upto:18,mult:.5},{upto:20,mult:.3}];function q(t,n){if(!t)return 0;let e=O.find(r=>t<=r.upto);return e?e.mult*(n?2:1):0}var C=[12,21],N=300,R=30,y=4e3,M=.92,v=[.45,.25,.15,.15];function $(t){return Date.UTC(+t.slice(0,4),+t.slice(4,6)-1,+t.slice(6,8),+t.slice(8,10))-9*36e5}function G(t=Date.now()){for(let n=0;n<3;n++){let e=new Date(t+324e5+n*864e5);for(let r of C){let o=`${e.getUTCFullYear()}${String(e.getUTCMonth()+1).padStart(2,"0")}${String(e.getUTCDate()).padStart(2,"0")}${String(r).padStart(2,"0")}`;if($(o)+R*y+6e4>t)return o}}return""}function K(t,n,e){let r=w(n),o=Math.floor(e.reduce((s,u)=>s+u.cards,0)*N*M),a=e.map(s=>{let u={at:0,jun:!1};for(let p=0;p<s.cards;p++){let c=A(_(`${t}|${s.code}|${p}`),r,R);c.at&&(!u.at||c.at<u.at||c.at===u.at&&c.jun&&!u.jun)&&(u=c)}return{code:s.code,name:s.name,cards:s.cards,at:u.at,jun:u.jun,place:0,pay:0}}),f=[...new Set(a.filter(s=>s.at).map(s=>s.at))].sort((s,u)=>s-u);a.forEach(s=>{s.place=s.at?Math.min(4,f.indexOf(s.at)+1):0});let l=v.slice();for(let s=4;s>=2;s--)a.some(u=>u.place===s)||(l[s-2]+=l[s-1],l[s-1]=0);for(let s=1;s<=4;s++){let u=a.filter(c=>c.place===s);if(!u.length)continue;let p=u.reduce((c,m)=>c+(m.jun?2:1),0);for(let c of u)c.pay=Math.floor(o*l[s-1]*(c.jun?2:1)/p)}return a.sort((s,u)=>(s.place||99)-(u.place||99)||u.pay-s.pay),{rows:a,pool:o}}return D(Q);})();
+
+// 運営の予約の決まり（src/games/sched.ts を build.mjs が下の行に埋め込む）
+var SchedCore=(()=>{var d=Object.defineProperty;var k=Object.getOwnPropertyDescriptor;var b=Object.getOwnPropertyNames;var v=Object.prototype.hasOwnProperty;var y=(e,t)=>{for(var n in t)d(e,n,{get:t[n],enumerable:!0})},w=(e,t,n,r)=>{if(t&&typeof t=="object"||typeof t=="function")for(let o of b(t))!v.call(e,o)&&o!==n&&d(e,o,{get:()=>t[o],enumerable:!(r=k(t,o))||r.enumerable});return e};var I=e=>w(d({},"__esModule",{value:!0}),e);var A={};y(A,{BONUS_MULS:()=>E,BONUS_NAME:()=>g,BONUS_TARGETS:()=>S,RULE_TEMPLATES:()=>c,SCHED_EVENTS:()=>h,SCHED_EVENT_NAME:()=>f,SCHED_KIND_NAME:()=>p,activeRule:()=>M,activeSched:()=>s,bonusMul:()=>R,cleanSched:()=>T,cleanSchedList:()=>N,rulePatch:()=>_,schedEvents:()=>D,schedSpan:()=>$});var p={event:"\u5B63\u7BC0\u30A4\u30D9\u30F3\u30C8",bonus:"\u3054\u307B\u3046\u3073\u5897\u91CF",rule:"\u671F\u9593\u9650\u5B9A\u30EB\u30FC\u30EB",notice:"\u304A\u77E5\u3089\u305B"},h=["newyear","summer"],f={newyear:"\u6B63\u6708\u306E\u798F\u5F15\u304D\u5927\u4F1A",summer:"\u590F\u796D\u308A\uFF08\u91D1\u9B5A\u3059\u304F\u3044\u30FB\u5C04\u7684\uFF09"},S=["all","login","drill","mission"],g={all:"\u30ED\u30B0\u30A4\u30F3\u30FB\u7DF4\u7FD2\u30FB\u30DF\u30C3\u30B7\u30E7\u30F3",login:"\u30ED\u30B0\u30A4\u30F3\u30DC\u30FC\u30CA\u30B9",drill:"\u7DF4\u7FD2\u306E\u6B63\u89E3",mission:"\u30DF\u30C3\u30B7\u30E7\u30F3"},E=[2,3],c=[{id:"manzu",name:"\u842C\u5B50\u306E\u6DF7\u4E00\u8272\u304C\u5F79\u6E80",desc:"\u842C\u5B50\u3068\u5B57\u724C\u3060\u3051\u306E\u624B\u304C\u5F79\u6E80",patch:{manzuHonitsu:!0}},{id:"aka",name:"\u8D64\u30C9\u30E94\u679A",desc:"\u8D645\u7B52\u30FB\u8D645\u7D22\u304C2\u679A\u305A\u3064",patch:{redP:2,redS:2}},{id:"pocchi",name:"\u767D\u30DD\u30C3\u30C1\u3068\u30B5\u30A4\u30B3\u30ED\u30C9\u30E9",desc:"\u7ACB\u76F4\u5F8C\u306E\u767D\u30DD\u30C3\u30C1\u306F\u4E07\u80FD\u724C\u30FB\u30BE\u30ED\u76EE\u3067\u30C9\u30E9\u8868\u793A\u304C\u5897\u3048\u308B",patch:{pocchi:!0,diceDora:!0}},{id:"local",name:"\u30ED\u30FC\u30AB\u30EB\u5F79",desc:"\u5927\u8ECA\u8F2A\u30FB\u4E09\u9023\u523B\u30FB\u4E00\u8272\u4E09\u9806\u30FB\u5341\u4E09\u4E0D\u5854\u30FB\u4EBA\u548C\uFF08\u5F79\u6E80\uFF09",patch:{daisharin:!0,sanrenkou:!0,isshokuSanjun:!0,shiisanpuutaa:!0,renhou:"yakuman"}},{id:"tonpu",name:"\u6771\u98A8\u6226",desc:"\u6771\u5834\u3060\u3051\u306E\u77ED\u3044\u5BFE\u5C40",patch:{length:"tonpu"}},{id:"karasu",name:"\u30AB\u30E9\u30B9",desc:"\u7ACB\u76F4\u306E\u307F\uFF08\u30C9\u30E9\u306A\u3057\uFF09\u306E\u30ED\u30F3\u306F\u8DF3\u6E80",patch:{karasu:!0}}],m=(e,t)=>typeof e=="string"?e.replace(/[\u0000-\u001f<>]/g,"").trim().slice(0,t):"";function T(e){if(!e||typeof e!="object")return null;let t=e.kind;if(!(t in p))return null;let n=m(e.id,24);if(!/^[a-z0-9-]{4,24}$/.test(n))return null;let r=Number(e.from),o=Number(e.to);if(!isFinite(r)||!isFinite(o)||o<=r||o-r>62*864e5)return null;let i={id:n,kind:t,title:m(e.title,40),from:Math.round(r),to:Math.round(o)};if(t==="event"){if(!h.includes(e.ev))return null;i.ev=e.ev,i.title||(i.title=f[i.ev])}if(t==="bonus"){if(!S.includes(e.target)||!E.includes(e.mul))return null;i.target=e.target,i.mul=e.mul,i.title||(i.title=`${g[i.target]}\u306E\u3054\u307B\u3046\u3073${i.mul}\u500D`)}if(t==="rule"){let u=Array.isArray(e.tpl)?[...new Set(e.tpl.filter(a=>c.some(l=>l.id===a)))]:[];if(!u.length)return null;i.tpl=u,i.title||(i.title=u.map(a=>c.find(l=>l.id===a).name).join("\u30FB"))}if(t==="notice"){let u=m(e.text,300);if(!u)return null;i.text=u,i.title||(i.title="\u304A\u77E5\u3089\u305B")}return i}var N=e=>Array.isArray(e)?e.map(T).filter(t=>!!t).slice(0,100):[],s=(e,t=Date.now())=>e.filter(n=>t>=n.from&&t<n.to),D=(e,t=Date.now())=>s(e,t).filter(n=>n.kind==="event"&&n.ev).map(n=>n.ev);function R(e,t,n=Date.now()){return s(e,n).filter(r=>r.kind==="bonus"&&(r.target===t||r.target==="all")).reduce((r,o)=>Math.max(r,o.mul??1),1)}function M(e,t=Date.now()){return s(e,t).filter(n=>n.kind==="rule").sort((n,r)=>n.to-r.to)[0]??null}function _(e){let t={};for(let n of e.tpl??[])Object.assign(t,c.find(r=>r.id===n)?.patch??{});return{...t,name:`\u671F\u9593\u9650\u5B9A\uFF1A${e.title}`.slice(0,40),id:`limited-${e.id}`}}function $(e){let t=n=>{let r=new Date(n+324e5);return`${r.getUTCMonth()+1}/${r.getUTCDate()} ${String(r.getUTCHours()).padStart(2,"0")}:${String(r.getUTCMinutes()).padStart(2,"0")}`};return`${t(e.from)}\u301C${t(e.to)}`}return I(A);})();
+
+
 // 開発者の鍵（そのものではなく SHA-256。鍵は開発者だけが持つ）
 const ADMIN = '3281af2469ee696e90b0f135bee186c5d8a0cfd8c288e9f526f473463d31dd60';
-const CATS = ['bug', 'idea', 'cpu', 'other'];
 
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 const sha = async s => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))), b => b.toString(16).padStart(2, '0')).join('');
@@ -60,26 +72,6 @@ export default async (req, context) => {
   const path = url.pathname.replace(/^\/api\/?/, '').replace(/\/$/, '');
   const admin = (await sha(req.headers.get('x-admin-key') || '')) === ADMIN;
   try {
-    if (path === 'feedback') {
-      const st = getStore('feedback');
-      if (req.method === 'POST') {
-        const b = await body(req);
-        const text = str(b?.text, 2000);
-        if (!text) return json({ error: '本文がありません' }, 400);
-        if (await limited('fb', context.ip, 10)) return json({ error: '今日はこれ以上送れません。明日またお願いします' }, 429);
-        const item = { t: Date.now(), cat: CATS.includes(b.cat) ? b.cat : 'other', text, name: str(b.name, 24), contact: str(b.contact, 80), ver: str(b.ver, 16), dev: str(b.dev, 120), friend: str(b.friend, 10) };
-        await st.setJSON(`${item.t}-${Math.random().toString(36).slice(2, 8)}`, item);
-        return json({ ok: true });
-      }
-      if (req.method === 'GET') {
-        const blobs = await listAll(st);
-        if (!admin) return json({ count: blobs.length });
-        const items = await Promise.all(blobs.map(async b => ({ key: b.key, ...(await st.get(b.key, { type: 'json' })) })));
-        items.sort((a, b) => b.t - a.t);
-        return json({ items });
-      }
-      if (req.method === 'DELETE' && admin) { await st.delete(str(url.searchParams.get('key'), 64)); return json({ ok: true }); }
-    }
     if (path === 'rules') {
       const st = getStore('rules');
       if (req.method === 'POST') {
@@ -416,7 +408,217 @@ export default async (req, context) => {
         v = { seed, hash: await sha(seed), made: Date.now() };
         await st.setJSON(id, v);
       }
-      return json({ id, hash: v.hash, ...(Date.now() >= at ? { seed: v.seed } : {}) });
+      return json({ id, hash: v.hash, made: v.made ?? null, ...(Date.now() >= at ? { seed: v.seed } : {}) });
+    }
+    if (path === 'sched') {
+      // 運営の予約：一覧は1つの置き場（list）。終わって7日たったものは返さない
+      const st = getStore('sched');
+      const cur = (await st.get('list', { type: 'json' }))?.items ?? [];
+      if (req.method === 'GET') return json({ items: cur.filter(x => x.to > Date.now() - 7 * 864e5) });
+      if (req.method === 'POST') {
+        if (!admin) return json({ error: 'key' }, 403);
+        const b = await body(req, 6000);
+        let items = cur.filter(x => x.to > Date.now() - 30 * 864e5);
+        if (b?.op === 'add') {
+          const it = SchedCore.cleanSched(b.item);
+          if (!it) return json({ error: '予約の中身が正しくありません' }, 400);
+          items = [...items.filter(x => x.id !== it.id), it].sort((x, y) => x.from - y.from).slice(-100);
+        } else if (b?.op === 'del') items = items.filter(x => x.id !== str(b.id, 24));
+        else return json({ error: 'bad' }, 400);
+        await st.setJSON('list', { items, at: Date.now() });
+        return json({ ok: true, items });
+      }
+    }
+    if (path === 'race' && req.method === 'GET') {
+      // 日付 YYYYMMDD（日本時間）。発走時刻は src/games/race/race.ts の timesOf と同じ（RACE12_FROM の日から12レース）
+      const d = str(url.searchParams.get('d'), 8);
+      if (!/^\d{8}$/.test(d)) return json({ error: 'bad' }, 400);
+      const t0 = Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8)) - 9 * 3600e3;
+      if (!isFinite(t0) || t0 - Date.now() > 2 * 864e5 || Date.now() - t0 > 60 * 864e5) return json({ error: 'range' }, 400);
+      if (await limited('rc', context.ip, 300)) return json({ error: 'limit' }, 429);
+      const TIMES = d < '20261102' ? [[10, 0], [12, 30], [15, 0], [17, 30], [20, 0], [21, 30]] : [[10, 0], [11, 0], [12, 0], [13, 0], [14, 0], [15, 0], [16, 0], [17, 0], [18, 0], [19, 30], [20, 30], [21, 30]];
+      const st = getStore('races');
+      let v = await st.get(d, { type: 'json' });
+      // レースの数が変わった日に前の数の種があれば、最初のレースの前なら作り直す
+      if (v?.seeds && v.seeds.length !== TIMES.length && Date.now() < t0 + (TIMES[0][0] * 60 + TIMES[0][1]) * 60e3) v = null;
+      if (!v?.seeds) {
+        // 終わった日の種は、あとから作らない（都合のよい種を作れないように）
+        if (Date.now() >= t0 + 864e5) return json({ error: 'none' }, 404);
+        const seeds = TIMES.map(() => rnd(32));
+        v = { seeds, hashes: await Promise.all(seeds.map(x => sha(x))), made: Date.now() };
+        await st.setJSON(d, v);
+      }
+      const now = Date.now();
+      return json({ d, hashes: v.hashes, made: v.made ?? null, seeds: v.seeds.map((x, r) => (now >= t0 + (TIMES[r][0] * 60 + TIMES[r][1]) * 60e3 ? x : null)) });
+    }
+    if (path === 'town') {
+      // 町の様子（フレンドが留守でも見られるように、最後の様子を1つだけ置く）と、訪ねてくれた数（同じ人は1日1回）
+      const st = getStore('town');
+      const ok = c => /^[A-HJ-NP-Z2-9]{8}$/.test(c);
+      if (req.method === 'POST') {
+        const b = await body(req, 16000);
+        const token = str(b?.token, 64);
+        if (!b || token.length < 16) return json({ error: 'bad' }, 400);
+        if (b.op === 'snap') {
+          const code = str(b.code, 8);
+          if (!ok(code) || !b.snap || typeof b.snap !== 'object' || b.snap.code !== code) return json({ error: 'bad' }, 400);
+          const js = JSON.stringify(b.snap); if (js.length > 14000) return json({ error: 'big' }, 413);
+          if (await limited('town', context.ip, 80)) return json({ error: 'limit' }, 429);
+          if (!(await owner(code, token))) return json({ error: 'owner' }, 403);
+          const cur = await st.get(`s/${code}`, { type: 'json' });
+          await st.setJSON(`s/${code}`, { snap: JSON.parse(js), at: Date.now(), visits: cur?.visits ?? 0 });
+          return json({ ok: true });
+        }
+        if (b.op === 'visit') {
+          const from = str(b.from, 8), to = str(b.to, 8);
+          if (!ok(from) || !ok(to) || from === to) return json({ error: 'bad' }, 400);
+          if (await limited('visit', context.ip, 200)) return json({ error: 'limit' }, 429);
+          if (!(await owner(from, token))) return json({ error: 'owner' }, 403);
+          const vk = `v/${to}/${from}`;
+          if ((await st.get(vk)) === day()) return json({ ok: true, counted: false });
+          await st.set(vk, day());
+          const cur = await st.get(`s/${to}`, { type: 'json' });
+          if (cur) await st.setJSON(`s/${to}`, { ...cur, visits: (cur.visits ?? 0) + 1 });
+          return json({ ok: true, counted: true });
+        }
+        return json({ error: 'bad' }, 400);
+      }
+      if (req.method === 'GET') {
+        const code = str(url.searchParams.get('code'), 8);
+        if (!ok(code)) return json({ error: 'bad' }, 400);
+        if (await limited('townget', context.ip, 600)) return json({ error: 'limit' }, 429);
+        const cur = await st.get(`s/${code}`, { type: 'json' });
+        return cur ? json({ snap: cur.snap, at: cur.at, visits: cur.visits ?? 0 }) : json({ error: 'none' }, 404);
+      }
+    }
+    if (path === 'note') {
+      // フレンドへのお知らせの受け箱（騎乗の賞金・合同レースの結果など）。読むと消える
+      const st = getStore('note');
+      if (req.method === 'POST') {
+        const b = await body(req, 3000);
+        const from = str(b?.from, 8), to = str(b?.to, 8), token = str(b?.token, 64);
+        const n = b?.note;
+        if (!/^[A-HJ-NP-Z2-9]{8}$/.test(from) || !/^[A-HJ-NP-Z2-9]{8}$/.test(to) || from === to || token.length < 16 || !n || typeof n !== 'object' || !/^[\w-]{4,48}$/.test(String(n.id))) return json({ error: 'bad' }, 400);
+        if (!(await owner(from, token))) return json({ error: 'owner' }, 403);
+        if (await limited('note', context.ip, 150)) return json({ error: 'limit' }, 429);
+        await st.setJSON(`${to}/${from}-${n.id}`, { note: { k: str(n.k, 8), id: String(n.id), text: str(n.text, 80), coins: Math.max(0, Math.min(40000, Math.round(Number(n.coins) || 0))) }, at: Date.now() });
+        return json({ ok: true });
+      }
+      if (req.method === 'GET') {
+        const code = str(url.searchParams.get('code'), 8), token = str(req.headers.get('x-token'), 64);
+        if (!/^[A-HJ-NP-Z2-9]{8}$/.test(code) || token.length < 16) return json({ error: 'bad' }, 400);
+        if (!(await owner(code, token))) return json({ error: 'owner' }, 403);
+        const { blobs } = await st.list({ prefix: `${code}/` });
+        const items = [];
+        for (const x of blobs.slice(0, 50)) { const v = await st.get(x.key, { type: 'json' }); if (v) items.push({ from: x.key.slice(code.length + 1, code.length + 9), ...v }); await st.delete(x.key); }
+        return json({ items });
+      }
+    }
+    if (path === 'best') {
+      // 自己ベストと全員のランキング。ありえない記録（上限・下限の外）ははじく。src/ui/social/bests.ts の BEST_GAMES と同じ表
+      const GAMES = { fall: [0, 5e6, 0], hitblow: [1, 20, 1], rhythm: [0, 100, 0], pk_rush: [0, 2e5, 0], ps_rush: [0, 5e4, 0], bingo: [2, 37, 1], mj_top: [0, 2e5, 0], race_wins: [0, 999, 0] };
+      const st = getStore('best');
+      if (req.method === 'POST') {
+        const b = await body(req, 1500);
+        const code = str(b?.code, 8), game = str(b?.game, 16), token = str(b?.token, 64), sc = Number(b?.score);
+        const g = GAMES[game];
+        if (!/^[A-HJ-NP-Z2-9]{8}$/.test(code) || !g || token.length < 16 || !isFinite(sc) || sc < g[0] || sc > g[1]) return json({ error: 'bad' }, 400);
+        if (await limited('best', context.ip, 200)) return json({ error: 'limit' }, 429);
+        if (!(await owner(code, token))) return json({ error: 'owner' }, 403);
+        const key = `${game}/${code}`;
+        const cur = await st.get(key, { type: 'json' });
+        const better = !cur || (g[2] ? sc < cur.score : sc > cur.score);
+        if (better) await st.setJSON(key, { score: Math.round(sc * 10) / 10, name: str(b?.name, 10), at: Date.now() });
+        else if (cur && str(b?.name, 10) && cur.name !== str(b?.name, 10)) await st.setJSON(key, { ...cur, name: str(b?.name, 10) });
+        return json({ ok: true, best: better });
+      }
+      if (req.method === 'GET') {
+        const game = str(url.searchParams.get('game'), 16), code = str(url.searchParams.get('code'), 8);
+        const g = GAMES[game]; if (!g) return json({ error: 'bad' }, 400);
+        if (await limited('bestget', context.ip, 400)) return json({ error: 'limit' }, 429);
+        const blobs = (await st.list({ prefix: `${game}/` })).blobs.slice(0, 2000);
+        const all = (await Promise.all(blobs.map(async x => { const v = await st.get(x.key, { type: 'json' }); return v ? { code: x.key.slice(game.length + 1), name: v.name, score: v.score } : null; }))).filter(Boolean);
+        all.sort((a, b) => (g[2] ? a.score - b.score : b.score - a.score));
+        let rank = 0, prev = null;
+        all.forEach((r, i) => { if (r.score !== prev) { rank = i + 1; prev = r.score; } r.rank = rank; });
+        return json({ game, count: all.length, list: all.slice(0, 50), me: all.find(r => r.code === code) ?? null });
+      }
+    }
+    if (path === 'bingo') {
+      // 定時ビンゴ：回（YYYYMMDDHH・毎日12時と21時）ごとに種を作り、始まるまではハッシュだけ。参加は始まる前まで。
+      // 結果（ビンゴした順番と配当）は、参加者のカードと読み上げから、サーバーで計算する（BingoCore＝src/games/bingo/core.ts を build.mjs が埋め込む）
+      const st = getStore('bingo');
+      const b0 = req.method === 'POST' ? await body(req, 1500) : null;
+      const ev = str(req.method === 'POST' ? b0?.ev : url.searchParams.get('ev'), 10);
+      if (!/^\d{10}$/.test(ev) || !BingoCore.EVENT_HOURS.includes(+ev.slice(8, 10))) return json({ error: 'bad' }, 400);
+      const start = BingoCore.eventStart(ev), end = start + BingoCore.EVENT_CALLS * BingoCore.EVENT_STEP;
+      if (!isFinite(start) || start - Date.now() > 2 * 864e5 || Date.now() - start > 7 * 864e5) return json({ error: 'range' }, 400);
+      let meta = await st.get(`m/${ev}`, { type: 'json' });
+      if (!meta) {
+        if (Date.now() >= start) return json({ error: 'none' }, 404);
+        const seed = rnd(32); meta = { seed, hash: await sha(seed) };
+        await st.setJSON(`m/${ev}`, meta);
+      }
+      if (req.method === 'POST') {
+        const b = b0;
+        const code = str(b?.code, 8), token = str(b?.token, 64), cards = Number(b?.cards);
+        if (!/^[A-HJ-NP-Z2-9]{8}$/.test(code) || token.length < 16 || ![1, 2, 3].includes(cards)) return json({ error: 'bad' }, 400);
+        if (Date.now() >= start - 5000) return json({ error: '締め切りました' }, 409);
+        if (await limited('bingo', context.ip, 60)) return json({ error: 'limit' }, 429);
+        if (!(await owner(code, token))) return json({ error: 'owner' }, 403);
+        const k = `j/${ev}/${code}`;
+        if (await st.get(k)) return json({ error: 'この回にはもう参加しています' }, 409);
+        await st.setJSON(k, { cards, name: str(b?.name, 10), at: Date.now() });
+        return json({ ok: true });
+      }
+      if (req.method === 'GET') {
+        if (await limited('bingoget', context.ip, 900)) return json({ error: 'limit' }, 429);
+        const code = str(url.searchParams.get('code'), 8);
+        const joined = (await st.list({ prefix: `j/${ev}/` })).blobs;
+        const out = { ev, hash: meta.hash, start, players: joined.length };
+        if (Date.now() >= start) out.seed = meta.seed;
+        if (url.searchParams.get('res') && Date.now() >= end) {
+          let res = await st.get(`r/${ev}`, { type: 'json' });
+          if (!res) {
+            const entries = (await Promise.all(joined.slice(0, 3000).map(async x => { const v = await st.get(x.key, { type: 'json' }); return v ? { code: x.key.slice(`j/${ev}/`.length), name: v.name, cards: v.cards } : null; }))).filter(Boolean);
+            res = BingoCore.eventResult(ev, meta.seed, entries);
+            await st.setJSON(`r/${ev}`, res);
+          }
+          out.pool = res.pool; out.top = res.rows.slice(0, 20); out.me = res.rows.find(r => r.code === code) ?? null; out.n = res.rows.length;
+        }
+        return json(out);
+      }
+    }
+    if (path === 'fest') {
+      // 町の祭り（毎月15日〜月末）：みんなの和了の合計で目標を目指す。1人が足せるのは1日に和了50回・対局30回まで
+      const st = getStore('fest');
+      const id = req.method === 'GET' ? str(url.searchParams.get('id'), 12) : '';
+      const goalOf = players => Math.max(300, players * 120);
+      if (req.method === 'POST') {
+        const b = await body(req, 1000);
+        const fid = str(b?.id, 12), code = str(b?.code, 8), token = str(b?.token, 64);
+        const ag = Math.round(Number(b?.add?.agari)), gm = Math.round(Number(b?.add?.games));
+        if (!/^fest-\d{6}$/.test(fid) || !/^[A-HJ-NP-Z2-9]{8}$/.test(code) || token.length < 16 || !(ag >= 0 && ag <= 200) || !(gm >= 0 && gm <= 100)) return json({ error: 'bad' }, 400);
+        const y = +fid.slice(5, 9), m = +fid.slice(9, 11);
+        const from = Date.UTC(y, m - 1, 15) - 9 * 3600e3, to = Date.UTC(y, m, 1) - 9 * 3600e3;
+        if (Date.now() < from || Date.now() >= to + 3600e3) return json({ error: 'お祭りの期間外です' }, 409);
+        if (await limited('fest', context.ip, 120)) return json({ error: 'limit' }, 429);
+        if (!(await owner(code, token))) return json({ error: 'owner' }, 403);
+        const pk = `p/${fid}/${code}/${day()}`;
+        const mine = (await st.get(pk, { type: 'json' })) ?? { agari: 0, games: 0 };
+        const addA = Math.max(0, Math.min(ag, 50 - mine.agari)), addG = Math.max(0, Math.min(gm, 30 - mine.games));
+        await st.setJSON(pk, { agari: mine.agari + addA, games: mine.games + addG });
+        const tot = (await st.get(`t/${fid}`, { type: 'json' })) ?? { agari: 0, games: 0, players: 0, who: [] };
+        const who = new Set(tot.who ?? []); who.add(code);
+        const next = { agari: tot.agari + addA, games: tot.games + addG, players: who.size, who: [...who].slice(0, 5000) };
+        await st.setJSON(`t/${fid}`, next);
+        return json({ total: { agari: next.agari, games: next.games, players: next.players, goal: goalOf(next.players) } });
+      }
+      if (req.method === 'GET') {
+        if (!/^fest-\d{6}$/.test(id)) return json({ error: 'bad' }, 400);
+        const tot = (await st.get(`t/${id}`, { type: 'json' })) ?? { agari: 0, games: 0, players: 0 };
+        return json({ agari: tot.agari, games: tot.games, players: tot.players, goal: goalOf(tot.players) });
+      }
     }
     if (path === 'err') {
       // 不具合の自動報告：同じ内容（メッセージ＋場所）は1件にまとめ、回数と最後の時刻だけ増やす
