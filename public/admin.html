@@ -33,6 +33,13 @@ select, label { font: inherit; } select { padding: 6px; border-radius: 8px; back
 <p class="msg" id="msg">鍵を入れて「読み込む」を押してください（この端末に覚えます）。</p>
 <h2>遊んでいる端末</h2>
 <div id="devs"></div>
+<h2>いま遊んでいる人 <span id="lvn"></span></h2>
+<p class="msg">アプリを開いている端末から1分ごとに届きます（10分以内に届いた端末。30秒ごとに自動で更新）。</p>
+<div class="wrap" id="lv"></div>
+<h2>コインの一斉配布（ポスト）</h2>
+<p class="msg">全員の町の「ポスト」に届き、各自が「受け取る」で受け取ります（1人1回・アカウントで同期）。</p>
+<div class="card"><div class="row"><label>コイン <input id="gcoins" type="number" min="1" max="1000000" value="1000" style="width:110px"></label><label>見出し <input id="gtitle" maxlength="30" placeholder="運営からのプレゼント"></label><label>受け取れる日数 <input id="gdays" type="number" min="1" max="60" value="7" style="width:60px"></label></div>
+<div class="row"><input id="gmsg" maxlength="200" placeholder="ひとこと（なくてもよい）" style="flex:1;min-width:260px"><button class="gold" id="gadd">配る</button></div><p class="msg" id="gmsg2"></p><div id="gl"></div></div>
 <h2>アプリの不具合（自動報告） <span id="ern"></span></h2>
 <div class="row"><button id="errclr" hidden>すべて消す</button></div>
 <div id="er"></div>
@@ -85,6 +92,7 @@ var AdminLib=(()=>{var _=Object.defineProperty;var Mt=Object.getOwnPropertyDescr
     var key = $('key').value.trim();
     try { localStorage.setItem('sanpo.admin', key); } catch (e) {}
     if (!quiet) $('msg').textContent = '読み込み中…';
+    liveLoad(); gload();
     if (RAW) {
       Promise.all([fetch('/api/usage', { headers: { 'x-admin-key': key }, cache: 'no-store' }).then(function (r) { return r.json(); }), fetch('/api/rules', { cache: 'no-store' }).then(function (r) { return r.json(); })]).then(function (a) {
         document.body.innerHTML = '<pre id="raw"></pre>';
@@ -126,6 +134,41 @@ var AdminLib=(()=>{var _=Object.defineProperty;var Mt=Object.getOwnPropertyDescr
       }).join('') + '</table>' : '<p class="msg">まだありません</p>';
     });
   }
+  // ---------- いま遊んでいる人 ----------
+  var WHERE = { 'CPU戦': 'CPU戦', '友人戦': '友人戦' };
+  function liveLoad() {
+    var key = $('key').value.trim(); if (!key) return;
+    fetch('/api/live', { headers: { 'x-admin-key': key }, cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+      var it = d.items || [], now = Date.now();
+      var n5 = it.filter(function (x) { return now - x.at < 3 * 60e3; }).length;
+      $('lvn').textContent = '（' + it.length + '台・3分以内 ' + n5 + '台）';
+      $('lv').innerHTML = it.length ? '<table><tr><th>名前</th><th>ID</th><th>フレンドコード</th><th>いまの画面</th><th>最後に届いた</th><th>端末</th></tr>' + it.map(function (x) {
+        var ago = Math.round((now - x.at) / 1000);
+        return '<tr><td>' + esc(x.name || '（名前なし）') + '</td><td>' + esc(x.acct || '') + '</td><td>' + esc(x.code || '') + '</td><td>' + esc(WHERE[x.where] || x.where || '') + '</td><td>' + (ago < 90 ? ago + '秒前' : Math.round(ago / 60) + '分前') + '</td><td><small>' + esc(String(x.dev || '').slice(0, 60)) + '</small></td></tr>';
+      }).join('') + '</table>' : '<p class="msg">いま遊んでいる人はいません。</p>';
+    }).catch(function () {});
+  }
+  setInterval(liveLoad, 30000);
+  // ---------- コインの一斉配布 ----------
+  function glist(items) {
+    $('gl').innerHTML = items && items.length ? '<table><tr><th>見出し</th><th>コイン</th><th>配った日</th><th>受け取れる期限</th><th></th></tr>' + items.map(function (x) {
+      return '<tr><td>' + esc(x.title) + (x.msg ? '<br><small>' + esc(x.msg) + '</small>' : '') + '</td><td>' + esc(x.coins) + '</td><td>' + esc(fmt(x.at)) + '</td><td>' + esc(fmt(x.until)) + '</td><td><button data-gdel="' + esc(x.id) + '">取り消す</button></td></tr>';
+    }).join('') + '</table>' : '<p class="msg">配っているものはありません。</p>';
+  }
+  function gload() { fetch('/api/gift', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) { glist(d.items || []); }).catch(function () {}); }
+  function gpost(b) { return fetch('/api/gift', { method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-key': $('key').value.trim() }, body: JSON.stringify(b) }).then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || ('エラー ' + r.status)); return d; }); }); }
+  $('gadd').addEventListener('click', function () {
+    var c = Number($('gcoins').value);
+    if (!(c >= 1 && c <= 1000000)) { $('gmsg2').textContent = 'コインは1〜1,000,000'; return; }
+    if (!confirm('全員に ' + c + ' コインを配ります。よろしいですか？')) return;
+    gpost({ op: 'add', coins: c, title: $('gtitle').value, msg: $('gmsg').value, days: Number($('gdays').value) }).then(function (d) { $('gmsg2').textContent = '配りました（各自のポストに届きます）'; glist(d.items); }).catch(function (e) { $('gmsg2').textContent = e.message; });
+  });
+  $('gl').addEventListener('click', function (e) {
+    var id = e.target && e.target.getAttribute && e.target.getAttribute('data-gdel'); if (!id) return;
+    if (!confirm('この配布を取り消しますか？（もう受け取った人の分は戻りません）')) return;
+    gpost({ op: 'del', id: id }).then(function (d) { glist(d.items); }).catch(function (er) { $('gmsg2').textContent = er.message; });
+  });
+  gload();
   $('load').addEventListener('click', function () { load(false); });
   $('er').addEventListener('click', function (e) {
     var k = e.target && e.target.getAttribute && e.target.getAttribute('data-edel');

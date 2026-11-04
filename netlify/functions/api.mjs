@@ -642,6 +642,49 @@ export default async (req, context) => {
       }
       if (req.method === 'DELETE') { const k = str(url.searchParams.get('key'), 64); if (k === 'all') { for (const x of await listAll(st)) await st.delete(x.key); } else await st.delete(k); return json({ ok: true }); }
     }
+    if (path === 'gift') {
+      // コインの一斉配布（ポスト）：開発者が入れたものを全員が受け取れる。受け取りの記録は各端末（同じ id は1回）
+      const st = getStore('gifts');
+      const cur = ((await st.get('list', { type: 'json' }))?.items ?? []).filter(x => x.until > Date.now() - 864e5);
+      if (req.method === 'GET') return json({ items: cur.filter(x => x.until > Date.now()) });
+      if (req.method === 'POST') {
+        if (!admin) return json({ error: 'key' }, 403);
+        const b = await body(req, 3000);
+        let items = cur;
+        if (b?.op === 'add') {
+          const coins = Math.floor(Number(b.coins));
+          if (!Number.isFinite(coins) || coins < 1 || coins > 1000000) return json({ error: 'コインは1〜1,000,000' }, 400);
+          const days = Math.max(1, Math.min(60, Math.floor(Number(b.days) || 7)));
+          items = [...items, { id: 'g' + rnd(6), coins, title: str(b.title, 30) || '運営からのプレゼント', msg: str(b.msg, 200), at: Date.now(), until: Date.now() + days * 864e5 }].slice(-50);
+        } else if (b?.op === 'del') items = items.filter(x => x.id !== str(b.id, 24));
+        else return json({ error: 'bad' }, 400);
+        await st.setJSON('list', { items, at: Date.now() });
+        return json({ ok: true, items });
+      }
+    }
+    if (path === 'live') {
+      // いま遊んでいる人：開いている間、1分ごとに届く（10分より古いものは返さない）
+      const st = getStore('live');
+      if (req.method === 'POST') {
+        const b = await body(req, 1500);
+        const w = b?.who && typeof b.who === 'object' ? b.who : null;
+        const code = str(w?.code, 16).replace(/[^A-Za-z0-9-]/g, ''), acct = str(w?.acct, 32).replace(/[^A-Za-z0-9_.-]/g, '');
+        const dev = str(b?.did, 40).replace(/[^A-Za-z0-9_-]/g, '');
+        const k = dev || (acct ? `a-${acct}` : code ? `c-${code}` : '');
+        if (!k) return json({ error: 'bad' }, 400);
+        if (await limited('live', context.ip, 3000)) return json({ ok: true, skipped: true });
+        await st.setJSON(k, { name: str(w?.name, 20), code, acct, where: str(b?.where, 40), dev: str(w?.dev, 160), ver: str(w?.ver, 20), at: Date.now() });
+        return json({ ok: true });
+      }
+      if (req.method === 'GET') {
+        if (!admin) return json({ error: 'admin' }, 403);
+        const keys = (await listAll(st)).map(x => x.key).slice(0, 1000);
+        const all = await Promise.all(keys.map(async k => ({ key: k, ...(await st.get(k, { type: 'json' })) })));
+        const old = all.filter(x => !(x.at > Date.now() - 864e5));
+        for (const x of old.slice(0, 100)) await st.delete(x.key);
+        return json({ items: all.filter(x => x.at > Date.now() - 10 * 60e3).sort((a, b) => b.at - a.at) });
+      }
+    }
     if (path === 'usage') {
       // 利用状況：日ごとの「送ってきた端末の数」と「機能ごとの回数」、使っている人ごとの記録（開発者だけが見る）
       const st = getStore('usage');
