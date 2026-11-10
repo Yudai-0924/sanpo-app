@@ -16,6 +16,8 @@
 //   /api/fest     … 町の祭り（みんなの和了の合計と目標）
 //   /api/sched    … 運営の予約（季節イベント・ごほうび増量・期間限定ルール・お知らせ。読むのは誰でも、書くのは開発者の鍵が必要）
 //   /api/usage    … 利用状況（1日ごとの端末数と機能ごとの回数・使っている人ごとの名前・フレンドコード・アカウントID・最後に開いた時刻と回数）
+//   /api/live     … いま遊んでいる人（開いている間1分ごと）。同時に、使っている人ごとのプレイ時間を Blobs 'play' に貯める
+//   /api/ranking  … 開発者だけ：使っている人の記録（開いた回数・機能ごとの回数）とプレイ時間を合わせた一覧（開発者ページのランキング）
 import { getStore as gs } from '@netlify/blobs';
 // 書いたものがすぐ読めるように（既定は反映まで最大1分ほど遅れる）
 const getStore = name => gs({ name, consistency: 'strong' });
@@ -662,6 +664,42 @@ export default async (req, context) => {
         return json({ ok: true, items });
       }
     }
+    if (path === 'raceentry') {
+      // みんなの出走（src/ui/race/rentrynet.ts）：レースごとに、各自が鳥を1羽だけ登録する。締め切り（発走の30分前）のあとは受け付けず、上書きもしない。
+      // 時刻はサーバーの時計。一覧は日ごとにまとめて返し、締め切りを過ぎたレース（closed）はもう増えない＝誰が取っても同じ出走表になる
+      const d = str(url.searchParams.get('d'), 8);
+      const TIMES = (dd => (dd < '20261102' ? [[10, 0], [12, 30], [15, 0], [17, 30], [20, 0], [21, 30]] : [[10, 0], [11, 0], [12, 0], [13, 0], [14, 0], [15, 0], [16, 0], [17, 0], [18, 0], [19, 30], [20, 30], [21, 30]]));
+      const t0of = dd => Date.UTC(+dd.slice(0, 4), +dd.slice(4, 6) - 1, +dd.slice(6, 8)) - 9 * 3600e3;
+      const closeOf = (dd, r) => { const t = TIMES(dd)[r]; return t0of(dd) + (t[0] * 60 + t[1]) * 60e3 - 30 * 60e3; };
+      const st = getStore('raceentry');
+      if (req.method === 'POST') {
+        const b = await body(req, 3000);
+        const dd = str(b?.d, 8), code = str(b?.code, 8), token = str(b?.token, 64), r = Number(b?.r);
+        if (!/^\d{8}$/.test(dd) || !Number.isInteger(r) || r < 0 || r >= TIMES(dd).length || !/^[A-HJ-NP-Z2-9]{8}$/.test(code) || token.length < 16 || !b?.snap || typeof b.snap !== 'object' || typeof b.snap.sp !== 'string') return json({ error: 'bad' }, 400);
+        const js = JSON.stringify(b.snap); if (js.length > 1500) return json({ error: 'big' }, 413);
+        if (Date.now() >= closeOf(dd, r)) return json({ error: 'closed' }, 409);
+        if (closeOf(dd, r) - Date.now() > 2 * 864e5) return json({ error: 'range' }, 400);
+        if (await limited('re', context.ip, 120)) return json({ error: 'limit' }, 429);
+        if (!(await owner(code, token))) return json({ error: 'owner' }, 403);
+        const key = `${dd}/${r}/${code}`;
+        const cur = await st.get(key, { type: 'json' });
+        if (cur) return json({ ok: true, at: cur.at, dup: true });
+        const at = Date.now();
+        await st.setJSON(key, { name: str(b.name, 12), snap: JSON.parse(js), at });
+        return json({ ok: true, at });
+      }
+      if (req.method === 'GET') {
+        if (!/^\d{8}$/.test(d)) return json({ error: 'bad' }, 400);
+        const t0 = t0of(d);
+        if (!isFinite(t0) || t0 - Date.now() > 2 * 864e5 || Date.now() - t0 > 30 * 864e5) return json({ error: 'range' }, 400);
+        if (await limited('reg', context.ip, 600)) return json({ error: 'limit' }, 429);
+        const now = Date.now();
+        const { blobs } = await st.list({ prefix: `${d}/` });
+        const keys = blobs.map(x => x.key).slice(0, 600);
+        const list = (await Promise.all(keys.map(async k => { const v = await st.get(k, { type: 'json' }); const [, r, who] = k.split('/'); return v ? { r: Number(r), who, name: v.name, snap: v.snap, at: v.at } : null; }))).filter(Boolean);
+        return json({ d, now, closed: TIMES(d).map((_, r) => now >= closeOf(d, r)), list });
+      }
+    }
     if (path === 'live') {
       // いま遊んでいる人：開いている間、1分ごとに届く（10分より古いものは返さない）
       const st = getStore('live');
@@ -674,7 +712,25 @@ export default async (req, context) => {
         if (!k) return json({ error: 'bad' }, 400);
         if (await limited('live', context.ip, 3000)) return json({ ok: true, skipped: true });
         await st.setJSON(k, { name: str(w?.name, 20), code, acct, where: str(b?.where, 40), dev: str(w?.dev, 160), ver: str(w?.ver, 20), at: Date.now() });
-        return json({ ok: true });
+        // プレイ時間：鍵は /api/usage の users と同じ（a-<ID> か c-<コード>。無ければ d-<端末>）。
+        // 同じ人の前の知らせから50秒未満なら足さない（2台で開いていても二重に数えない）・1回で足すのは最大1分
+        const pk = acct ? `a-${acct}` : code ? `c-${code}` : `d-${dev}`;
+        const ps = getStore('play');
+        const now = Date.now(), today = day();
+        const p = (await ps.get(pk, { type: 'json' })) ?? { total: 0, days: {}, nd: 0, first: now };
+        const add = p.last && now - p.last < 50e3 ? 0 : 1;
+        if (add) {
+          p.total = (p.total ?? 0) + add;
+          p.days = p.days && typeof p.days === 'object' ? p.days : {};
+          if (!p.days[today]) p.nd = (p.nd ?? 0) + 1;
+          p.days[today] = (p.days[today] ?? 0) + add;
+          const keep = new Date(now + 9 * 3600e3 - 34 * 864e5).toISOString().slice(0, 10);
+          for (const d of Object.keys(p.days)) if (d < keep) delete p.days[d];
+          p.last = now;
+          p.name = str(w?.name, 20) || p.name || ''; p.code = code || p.code || ''; p.acct = acct || p.acct || '';
+          await ps.setJSON(pk, p);
+        }
+        return json({ ok: true, add });
       }
       if (req.method === 'GET') {
         if (!admin) return json({ error: 'admin' }, 403);
@@ -728,6 +784,34 @@ export default async (req, context) => {
         const users = (await Promise.all(ukeys.map(async k => ({ key: k, ...(await us.get(k, { type: 'json' })) })))).sort((a, b) => (b.last ?? 0) - (a.last ?? 0));
         return json({ days, users });
       }
+    }
+    if (path === 'ranking') {
+      // ランキング（開発者だけ）：users（開いた回数・最初・最後・機能ごとの回数）と play（プレイ時間）を同じ鍵で合わせる
+      if (!admin) return json({ error: 'admin' }, 403);
+      if (req.method !== 'GET') return json({ error: 'bad' }, 400);
+      const us = getStore('users'), ps = getStore('play');
+      const [uk, pk] = await Promise.all([listAll(us), listAll(ps)]);
+      const [ul, pl] = await Promise.all([
+        Promise.all(uk.map(x => x.key).slice(0, 1000).map(async k => [k, await us.get(k, { type: 'json' })])),
+        Promise.all(pk.map(x => x.key).slice(0, 2000).map(async k => [k, await ps.get(k, { type: 'json' })])),
+      ]);
+      const now = Date.now();
+      const dayOf = n => new Date(now + 9 * 3600e3 - n * 864e5).toISOString().slice(0, 10);
+      const d7 = dayOf(6), d30 = dayOf(29), today = dayOf(0);
+      const sum = (ds, from) => Object.entries(ds || {}).reduce((a, [d, v]) => a + (d >= from ? Number(v) || 0 : 0), 0);
+      const map = new Map();
+      for (const [k, u] of ul) if (u) map.set(k, { key: k, name: u.name || '', acct: u.acct || '', code: u.code || '', first: u.first ?? null, last: u.last ?? null, opens: u.opens ?? 0, ev: u.ev || {}, pwa: !!u.pwa, dev: u.dev || '' });
+      for (const [k, p] of pl) {
+        if (!p) continue;
+        const r = map.get(k) ?? { key: k, name: '', acct: p.acct || '', code: p.code || '', first: p.first ?? null, last: null, opens: 0, ev: {} };
+        r.name = r.name || p.name || '';
+        r.play = { total: p.total ?? 0, d30: sum(p.days, d30), d7: sum(p.days, d7), today: Number(p.days?.[today]) || 0, days: p.nd ?? 0, last: p.last ?? null };
+        r.last = Math.max(r.last ?? 0, p.last ?? 0) || null;
+        map.set(k, r);
+      }
+      const items = [...map.values()].map(r => ({ ...r, play: r.play ?? { total: 0, d30: 0, d7: 0, today: 0, days: 0, last: null } }));
+      items.sort((a, b) => b.play.total - a.play.total || b.opens - a.opens);
+      return json({ items, now });
     }
     return json({ error: 'not found' }, 404);
   } catch (e) {
