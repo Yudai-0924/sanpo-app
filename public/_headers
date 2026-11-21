@@ -1,5 +1,5 @@
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'sha256-A+Socpwq6oU3h9oSVh1ftdOSBUgRaos73PYZnrYqze4=' 'sha256-+/JUlC18iLfBjRfU572CYTQf0MUO796jbzs+OorZWio=' 'sha256-C3IVNR3dvJA5QiPT154oRO/XX5DsdMZ6WATF1uIYVgk='; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' wss://broker.emqx.io:8084 wss://broker.hivemq.com:8884 wss://test.mosquitto.org:8081; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'sha256-A+Socpwq6oU3h9oSVh1ftdOSBUgRaos73PYZnrYqze4=' 'sha256-oww0qQQb1WXgYW6+vJDFCab2XiWxhoXXNJ927lOCxYs=' 'sha256-Nk3OLhogTP6XqlzkC1I9HX8WadrmxNsdKayZJ9x3WqU='; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' wss://broker.emqx.io:8084 wss://broker.hivemq.com:8884 wss://test.mosquitto.org:8081; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer
